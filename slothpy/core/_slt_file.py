@@ -554,7 +554,7 @@ class SltGroup(metaclass=MethodDelegateMeta):
         """
         pass
 
-    def supercell(self, nx: int, ny: int, nz: int, out, output_option: Literal["xyz", "slt"] = "xyz", xyz_filepath: Optional[str] = None, slt_group_name: Optional[str] = None) -> SltGroup:
+    def supercell(self, nx: int, ny: int, nz: int, output_option: Literal["xyz", "slt"] = "xyz", xyz_filepath: Optional[str] = None, slt_group_name: Optional[str] = None) -> SltGroup:
         """
         Generates a supercell by repeating the unit cell along x, y, and z axes.
 
@@ -1053,7 +1053,7 @@ class SltXyz(metaclass=MethodTypeMeta):
         if self._multiplicity is not None:
             additional_info += f"Multiplicity: {self._multiplicity} "
         if self._method_type in ["UNIT_CELL", "SUPERCELL"]:
-            additional_info += f"{"Cell" if self._method_type == "UNIT_CELL" else "Supercell"} parameters [a, b, c, alpha, beta, gamma]: {self._atoms.get_cell_lengths_and_angles()} "
+            additional_info += f"{"Cell" if self._method_type == "UNIT_CELL" else "Supercell"} parameters [a, b, c, alpha, beta, gamma]: {self._atoms.get_cell_lengths_and_angles().tolist()} "
         if self._method_type == "SUPERCELL":
             additional_info += f"Supercell_Repetitions [nx, ny, nz] = {self._nxnynz.tolist()} "
         
@@ -1184,11 +1184,11 @@ class SltUnitCell(SltXyz):
             multiplicity = ((self._multiplicity - 1) * nx * ny * nz) + 1
 
         if output_option == "xyz":
-            additional_info = f"Supercell parameters [a, b, c, alpha, beta, gamma]: {atoms.get_cell_lengths_and_angles()} "
+            additional_info = f"Supercell parameters [a, b, c, alpha, beta, gamma]: {atoms.get_cell_lengths_and_angles().tolist()} "
             write(xyz_filepath, self._atoms, comment=f"{additional_info}Created by SlothPy from File/Group '{self._slt_group._hdf5}/{self._slt_group._group_name}'")
         else:
-            _supercell_to_slt(self._hdf5, slt_group_name, atoms.get_chemical_symbols(), atoms.get_positions(), atoms.get_cell().array, nx, ny, nz, multiplicity)
-            return SltGroup(self._hdf5, slt_group_name)
+            _supercell_to_slt(self._slt_group._hdf5, slt_group_name, atoms.get_chemical_symbols(), atoms.get_positions(), atoms.get_cell().array, nx, ny, nz, multiplicity)
+            return SltGroup(self._slt_group._hdf5, slt_group_name)
 
     def generate_supercell_finite_stencil_displacements(self, nx: int, ny: int, nz: int, displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None, save_supercell_to_slt: Optional[str] = None) -> Optional[Iterator[Atoms]]:
         if self._method_type == "SUPERCELL":
@@ -1252,8 +1252,8 @@ class SltHessian(SltSuperCell):
     def phonon_density_of_states(self):
         pass # plus raman second order
 
-    def ir_spectrum(self):
-        pass
+    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", fwhm: float = None, slt_save: str = None):
+        return SltIrSpectrum(self._slt_group, self.hessian(), self.masess, start_wavenumber, stop_wavenumber, resolution, convolution, fwhm, slt_save)
 
     def animate_normal_modes(self):
         pass

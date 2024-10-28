@@ -25,6 +25,8 @@ from time import perf_counter_ns, sleep
 from datetime import datetime
 from signal import SIGINT, SIGTERM
 
+from threadpoolctl import threadpool_limits
+from numba import set_num_threads
 from numpy import ndarray, array, zeros, any, all, median, int64
 from pandas import DataFrame
 
@@ -90,7 +92,9 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
     @slothpy_exc("SltCompError")
     def run(self):
         if not self._ready:
-            self._result = self._executor()
+            with threadpool_limits(limits=settings.number_cpu):
+                set_num_threads(settings.number_cpu)
+                self._result = self._executor()
             self._ready = True
         if self._slt_save is not None:
             self.save()
@@ -225,8 +229,8 @@ class _MultiProcessed(_SingleProcessed):
         sm_arrays_info_list = self._sm_arrays_info[:]
         sm_arrays_info_list.append(self._sm_progress_array_info)
         if not self._returns:
-            sm_arrays_info_list.append(self._sm_result_info) ######## From here I removed self._slt_hamiltonian.info in the first entry
-        return [(sm_arrays_info_list, self._args, process_index, chunk.start, chunk.end, self._returns) for process_index, chunk in enumerate(_distribute_chunks(self._number_to_parallelize, self._number_processes))]
+            sm_arrays_info_list.append(self._sm_result_info) ######## From here I removed self._slt_hamiltonian.info in the first entry and self._returns from the last entry!!!!!!!!!
+        return [(sm_arrays_info_list, self._args, process_index, chunk.start, chunk.end) for process_index, chunk in enumerate(_distribute_chunks(self._number_to_parallelize, self._number_processes))]
 
     def _gather_results(self, results):
         pass

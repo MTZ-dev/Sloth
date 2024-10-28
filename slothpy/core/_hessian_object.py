@@ -23,7 +23,8 @@ from slothpy._general_utilities._numba_methods import _dynamical_matrix
 class Hessian():
     
     __slots__ = ["_sm", "_hessian", "_masses_inv_sqrt", "_kpoint", "_modes_cutoff", "_heevr_lwork", "_heevr", "_lwork", "_dtype_array"]
-    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], modes_cutoff):
+
+    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], modes_cutoff: int):
         sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list)
         self._sm = sm
         self._hessian = arrays[0]
@@ -43,11 +44,16 @@ class Hessian():
 
     def build_dynamical_matrix(self):
         return _dynamical_matrix(self._hessian, self._masses_inv_sqrt, self._kpoint, self._dtype_array)
-    
-    def mode_frequencies(self):
+
+    def frequencies_squared(self):
         if self._lwork is None:
             self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='N', range='I', il=1, iu=self._modes_cutoff)
         return self._heevr(self.build_dynamical_matrix().T, *self._lwork, jobz='N', range='I', il=1, iu=self._modes_cutoff)
+    
+    def eigenvectors_frequencies_squared(self, frequency_cutoff: float = None):
+        if self._lwork is None:
+            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='V', range='I' if frequency_cutoff is None else 'V', il=1, iu=self._modes_cutoff, vu=frequency_cutoff)
+        return self._heevr(self.build_dynamical_matrix().T, *self._lwork, jobz='V', range='I' if frequency_cutoff is None else 'V', il=1, iu=self._modes_cutoff, vu=frequency_cutoff)
 
     # def e_under_fields(self):
     #     if self._number_of_centers > 1:

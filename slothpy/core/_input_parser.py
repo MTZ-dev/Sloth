@@ -210,8 +210,9 @@ def validate_input(func):
                             raise ValueError(f"Energy unit must be one of the following strings: kj/mol, eh, hartree, au, ev, kcal/mol, you entered {value} with type {type(value)}")
                     case "xyz_filepath":
                         try:
-                            if not value.endswith(".xyz"):
-                                value += ".xyz"
+                            if value is not None:
+                                if not value.endswith(".xyz"):
+                                    value += ".xyz"
                         except Exception:
                             raise ValueError("XYZ fielpath must be a string.")
                     case "atom_indices":

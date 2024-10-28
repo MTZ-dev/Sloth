@@ -15,11 +15,11 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
-from typing import Literal, Union
+from typing import Literal, Union, Optional
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.synchronize import Event
 
-from numpy import ndarray, asarray, zeros, empty, repeat, sqrt
+from numpy import ndarray, outer, zeros, empty, repeat, sqrt
 from pandas import DataFrame
 import matplotlib.pyplot as plt
 from ase.dft.kpoints import BandPath
@@ -33,6 +33,11 @@ from slothpy._general_utilities._utils import slpjm_components_driver
 from slothpy._magnetism._zeeman import _zeeman_splitting_proxy
 from slothpy._magnetism._magnetisation import _magnetisation_proxy
 from slothpy._lattice_dynamics._phonon_dispersion import _phonon_dispersion_proxy
+
+#################
+# SingleProcessed
+#################
+
 
 class SltStatesEnergiesCm1(_SingleProcessed):
     _method_name = "States' Energies in cm-1"
@@ -526,7 +531,56 @@ class SltStatesMagneticDipoleMomenta(_SingleProcessed):
         pass
 
 
+class SltIrSpectrum(_SingleProcessed):
+    _method_name = "Infrared Spectrum"
+    _method_type = "IR_SPECTRUM"
+
+    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
+     
+    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", fwhm: float = None, slt_save: str = None) -> None:
+        super().__init__(slt_group, slt_save)
+        self._hessian = hessian
+        self._masses = masses
+        self._start_wavenumber = start_wavenumber
+        self._stop_wavenumber = stop_wavenumber
+        self._resolution = resolution
+        self._convolution = convolution
+        self._fwhm = fwhm
+
+    def _executor(self): #return tuple wave spectrum etc
+        return slpjm_components_driver(self._slt_group, "diagonal", "m", self._xyz, self._start_state, self._stop_state, self._rotation)
+
+    def _save(self):
+        self._metadata_dict = {
+            "Type": self._method_type,
+            "Kind": f"{self._xyz.upper() if isinstance(self._xyz, str) else 'ORIENTATIONAL'}",
+            "States": self._result.shape[1] if self._xyz == "xyz" or isinstance(self._xyz, ndarray) else self._result.shape[0],
+            "Precision": settings.precision.upper(),
+            "Description": f"States' expectation values of the magnetic dipole momentum from Group '{self._group_name}'."
+        }
+        self._data_dict = {"STATES_MAGNETIC_DIPOLE_MOMENTA": (self._result, f"{str(self._xyz).upper()}{' [(x-0, y-1, z-2), :]' if isinstance(self._xyz, str) and self._xyz == 'xyz' else ''} component{'s' if isinstance(self._xyz, str) and self._xyz == 'xyz' else ''} of the states's magnetic dipole momenta.")}
+        if self._rotation is not None:
+            self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the magnetic dipole momentum components.")
+    
+    def _load_from_slt_file(self): #load tuple
+        self._result = self._slt_group["STATES_MAGNETIC_DIPOLE_MOMENTA"][:]
+
+    #TODO: plot
+    def _plot(self):
+        pass
+
+    #TODO: df
+    def _to_data_frame(self):
+        pass
+
+
+################
+# MultiProcessed
+################
+
+
 class SltPropertyUnderMagneticField(_MultiProcessed):
+    #_method_name = ...................................... (here I assume it depends)
     _method_type = "PROPERTY_UNDER_MAGNETIC_FIELD"
 
     __slots__ = _MultiProcessed.__slots__ + ["_mode", "_matrix", "_return_energies", "_energies", "_direction", "_magnetic_fields", "_orientations", "_number_of_states", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine", "_dims"]
@@ -651,64 +705,6 @@ class SltPropertyUnderMagneticField(_MultiProcessed):
         pass
 
     # also in input parser add to error with direct acces to properties to use property_under_magnetic_field instead!! for slothpy hamiltonians with field [0,0,0]
-
-
-class SltPhononDispersion(_MultiProcessed):
-    _method_name = "Phonon Dispersion"
-    _method_type = "PHONON_DISPERSION"
-
-    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses", "_bandpath", "_modes_cutoff", "_x", "_x_coords", "_x_labels"]
-     
-    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, bandpath: BandPath, modes_cutoff: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
-        super().__init__(slt_group, len(bandpath.kpts), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
-        self._hessian = hessian
-        self._masses = masses
-        self._bandpath = bandpath
-        self._kpts = bandpath.kpts.astype(settings.float)
-        self._x, self._x_coords, self._x_labels = bandpath.get_linear_kpoint_axis()
-        self._modes_cutoff = modes_cutoff
-        self._args = [self._modes_cutoff]
-        self._executor_proxy = _phonon_dispersion_proxy
-    
-    def _load_args_arrays(self):
-        masses = repeat(self._masses, 3)
-        masses_inv_sqrt = 1.0 / sqrt(masses[:, None] * masses[None, :])
-        self._args_arrays = [self._hessian[:], masses_inv_sqrt, self._kpts]
-        self._result = empty((len(self._x), self._modes_cutoff), dtype=settings.float, order="C")
-
-    def _save(self):
-        self._metadata_dict = {
-            "Type": self._method_type,
-            "Precision": settings.precision.upper(),
-            "Description": f"Group containing {self._method_name} calculated from Group '{self._group_name}'."
-        }
-        self._data_dict = {
-            f"{self._method_type}": (self._result, f"Dataset containing {self._method_name} in the form [kpts, frequencies] in cm-1."),
-            "X": (self._x, "Dataset containing X coordinates for the dispersion plotting."),
-            "X_COORDS": (self._x_coords, "Dataset containing X coordiantes of the special point labels."),
-            "X_LABELS": (self._x_labels, "Dataset containing the special point labels."),
-        }
-
-    def _load_from_slt_file(self):
-        self._result = self._slt_group[f"{self._method_type}"][:]
-        self._x = self._slt_group["X"][:]
-        self._x_coords = self._slt_group["X_COORDS"][:]
-        self._x_labels = self._slt_group["X_LABELS"][:]
-
-    def _plot(self, **kwargs):
-        plt.figure(figsize=(8, 6))
-        for mode in range(self._result.shape[1]):
-            plt.plot(self._x, self._result[:, mode], color='b')
-
-        plt.xticks(self._x_coords, self._x_labels)
-        plt.xlabel('Wave Vector Fraction along Path')
-        plt.ylabel('Frequency (cm$^{-1}$)')  # Adjust units as needed
-        plt.title('Phonon Dispersion')
-        plt.grid(True)
-        plt.show()
- 
-    def _to_data_frame(self):
-        pass
 
 
 class SltZeemanSplitting(_MultiProcessed):
@@ -859,6 +855,65 @@ class SltMagnetisation(_MultiProcessed):
 
     def _plot(self):
         pass
+ 
+    def _to_data_frame(self):
+        pass
+
+
+class SltPhononDispersion(_MultiProcessed):
+    _method_name = "Phonon Dispersion"
+    _method_type = "PHONON_DISPERSION"
+
+    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses", "_bandpath", "_modes_cutoff", "_x", "_x_coords", "_x_labels"]
+     
+    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, bandpath: BandPath, modes_cutoff: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
+        super().__init__(slt_group, len(bandpath.kpts), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
+        self._hessian = hessian
+        self._masses = masses
+        self._bandpath = bandpath
+        self._kpts = bandpath.kpts.astype(settings.float)
+        self._x, self._x_coords, self._x_labels = bandpath.get_linear_kpoint_axis()
+        self._modes_cutoff = modes_cutoff
+        self._args = [self._modes_cutoff]
+        self._executor_proxy = _phonon_dispersion_proxy
+    
+    def _load_args_arrays(self):
+        masses = repeat(self._masses, 3)
+        masses_inv_sqrt = 1.0 / sqrt(masses)
+        masses_inv_sqrt = outer(masses_inv_sqrt, masses_inv_sqrt)
+        self._args_arrays = [self._hessian[:], masses_inv_sqrt, self._kpts]
+        self._result = empty((len(self._x), self._modes_cutoff), dtype=settings.float, order="C")
+
+    def _save(self):
+        self._metadata_dict = {
+            "Type": self._method_type,
+            "Precision": settings.precision.upper(),
+            "Description": f"Group containing {self._method_name} calculated from Group '{self._group_name}'."
+        }
+        self._data_dict = {
+            f"{self._method_type}": (self._result, f"Dataset containing {self._method_name} in the form [kpts, frequencies] in cm-1."),
+            "X": (self._x, "Dataset containing X coordinates for the dispersion plotting."),
+            "X_COORDS": (self._x_coords, "Dataset containing X coordiantes of the special point labels."),
+            "X_LABELS": (self._x_labels, "Dataset containing the special point labels."),
+        }
+
+    def _load_from_slt_file(self):
+        self._result = self._slt_group[f"{self._method_type}"][:]
+        self._x = self._slt_group["X"][:]
+        self._x_coords = self._slt_group["X_COORDS"][:]
+        self._x_labels = self._slt_group["X_LABELS"][:]
+
+    def _plot(self, **kwargs):
+        plt.figure(figsize=(8, 6))
+        for mode in range(self._result.shape[1]):
+            plt.plot(self._x, self._result[:, mode], color='b')
+
+        plt.xticks(self._x_coords, self._x_labels)
+        plt.xlabel('Wave Vector Fraction along Path')
+        plt.ylabel('Frequency (cm$^{-1}$)')  # Adjust units as needed
+        plt.title('Phonon Dispersion')
+        plt.grid(True)
+        plt.show()
  
     def _to_data_frame(self):
         pass

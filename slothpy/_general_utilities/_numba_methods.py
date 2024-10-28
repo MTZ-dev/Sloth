@@ -36,9 +36,9 @@ def _dynamical_matrix(hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarra
     for nx in prange(hessian.shape[0]):
         for ny in range(hessian.shape[1]):
             for nz in range(hessian.shape[2]):
-                dyn_mat += hessian[nx, ny, nz, :, :] * exp(2j * pi * (kpoint[0] * nx + kpoint[1] * ny + kpoint[2] * nz))
+                dyn_mat += hessian[nx, ny, nz, :, :] * exp(-2j * pi * (kpoint[0] * nx + kpoint[1] * ny + kpoint[2] * nz)) # conj for fortran
 
     dyn_mat *= masses_inv_sqrt
     dyn_mat += dyn_mat.conj().T
     
-    return array(-0.5, dtype=array_dtype.dtype) * dyn_mat.conj()
+    return array(-0.5, dtype=array_dtype.dtype) * dyn_mat

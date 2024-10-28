@@ -39,9 +39,7 @@ def generate_input_file(dof_number, disp_number, wfn_start = None):
     else:
         restart_wfn_line = '    WFN_RESTART_FILE_NAME dof_0_disp_0-RESTART.wfn'
 
-    input_template = """
-
-&GLOBAL
+    input_template = """&GLOBAL
   PROJECT {project_name}
   RUN_TYPE ENERGY_FORCE
   PRINT_LEVEL MEDIUM
