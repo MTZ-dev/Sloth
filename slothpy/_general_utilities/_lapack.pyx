@@ -26,8 +26,9 @@ from scipy.linalg.cython_lapack cimport zheevr, cheevr
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-
+##################
 # Double precision
+##################
 
 
 @boundscheck(False)
@@ -217,7 +218,32 @@ def _zdot3d(cnp.ndarray[cnp.complex128_t, ndim=3] M, cnp.ndarray[cnp.float64_t, 
     return result
 
 
+@boundscheck(False)
+@wraparound(False)
+def _zgemmt(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] M, cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] N) -> cnp.ndarray[cnp.complex128_t]:
+    cdef:
+        int m = M.shape[1]
+        int n = N.shape[1]
+        int k = M.shape[0]
+        cnp.npy_intp *dims = [m, n]
+        cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] A = cnp.PyArray_EMPTY(2, dims, cnp.NPY_COMPLEX128, 1)
+        cnp.complex128_t alpha = 1.0 + 0.0j
+        cnp.complex128_t beta = 0.0 + 0.0j
+        char transa = b'T'[0]
+        char transb = b'N'[0]
+        int lda = M.shape[0]
+        int ldb = N.shape[0]
+        int ldc = A.shape[0]
+
+    with nogil:
+        zgemm(&transa, &transb, &m, &n, &k, &alpha, &M[0, 0], &lda, &N[0, 0], &ldb, &beta, &A[0, 0], &ldc)
+
+    return A
+
+
+##################
 # Single precision
+##################
 
 
 @boundscheck(False)
@@ -406,3 +432,26 @@ def _cdot3d(cnp.ndarray[cnp.complex64_t, ndim=3] M, cnp.ndarray[cnp.float32_t, n
         caxpy(&size, &alpha2, &M[2, 0, 0], &one, &result[0, 0], &one)
 
     return result
+
+
+@boundscheck(False)
+@wraparound(False)
+def _cgemmt(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] M, cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] N) -> cnp.ndarray[cnp.complex64_t]:
+    cdef:
+        int m = M.shape[1]
+        int n = N.shape[1]
+        int k = M.shape[0]
+        cnp.npy_intp *dims = [m, n]
+        cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] A = cnp.PyArray_EMPTY(2, dims, cnp.NPY_COMPLEX64, 1)
+        cnp.complex64_t alpha = 1.0 + 0.0j
+        cnp.complex64_t beta = 0.0 + 0.0j
+        char transa = b'T'[0]
+        char transb = b'N'[0]
+        int lda = M.shape[0]
+        int ldb = N.shape[0]
+        int ldc = A.shape[0]
+
+    with nogil:
+        cgemm(&transa, &transb, &m, &n, &k, &alpha, &M[0, 0], &lda, &N[0, 0], &ldb, &beta, &A[0, 0], &ldc)
+
+    return A

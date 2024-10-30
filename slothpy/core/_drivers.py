@@ -99,9 +99,12 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
         if self._slt_save is not None:
             self.save()
     
+    def _return(self):
+        return self._result
+    
     @ensure_ready
     def eval(self) -> ndarray:
-        return self._result
+        return self._return()
 
     @abstractmethod
     def _save(self):

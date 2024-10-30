@@ -532,38 +532,43 @@ class SltStatesMagneticDipoleMomenta(_SingleProcessed):
 
 
 class SltIrSpectrum(_SingleProcessed):
-    _method_name = "Infrared Spectrum"
+    _method_name = "IR Spectrum"
     _method_type = "IR_SPECTRUM"
 
-    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
+    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses", "_born_charges", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
      
-    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", fwhm: float = None, slt_save: str = None) -> None:
+    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
         super().__init__(slt_group, slt_save)
         self._hessian = hessian
         self._masses = masses
+        self._born_charges = born_charges
         self._start_wavenumber = start_wavenumber
         self._stop_wavenumber = stop_wavenumber
-        self._resolution = resolution
         self._convolution = convolution
+        self._resolution = resolution
         self._fwhm = fwhm
 
     def _executor(self): #return tuple wave spectrum etc
-        return slpjm_components_driver(self._slt_group, "diagonal", "m", self._xyz, self._start_state, self._stop_state, self._rotation)
+        return _ir_spectrum(self._hessian, self._masses, self._born_charges, self._start_wavenumber, self._stop_wavenumber, self._convolution, self._resolution, self._fwhm)
 
     def _save(self):
         self._metadata_dict = {
             "Type": self._method_type,
-            "Kind": f"{self._xyz.upper() if isinstance(self._xyz, str) else 'ORIENTATIONAL'}",
-            "States": self._result.shape[1] if self._xyz == "xyz" or isinstance(self._xyz, ndarray) else self._result.shape[0],
+            "Kind": "INTENSITIES" if self._convolution is None else "CONVOLUTION",
+            "States": self._result[0].shape[0],
             "Precision": settings.precision.upper(),
-            "Description": f"States' expectation values of the magnetic dipole momentum from Group '{self._group_name}'."
+            "Description": f"IR intensities{"" if self._convolution is None else " and convoluted spectra"} calculated from Group '{self._group_name}'."
         }
-        self._data_dict = {"STATES_MAGNETIC_DIPOLE_MOMENTA": (self._result, f"{str(self._xyz).upper()}{' [(x-0, y-1, z-2), :]' if isinstance(self._xyz, str) and self._xyz == 'xyz' else ''} component{'s' if isinstance(self._xyz, str) and self._xyz == 'xyz' else ''} of the states's magnetic dipole momenta.")}
-        if self._rotation is not None:
-            self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the magnetic dipole momentum components.")
+        self._data_dict = {"INTENSITIES": (self._result[0], f"")}
+        if self._convolution is not None:
+            self._data_dict["CONVOLUTION"] = (self._result[1], f"")
     
-    def _load_from_slt_file(self): #load tuple
-        self._result = self._slt_group["STATES_MAGNETIC_DIPOLE_MOMENTA"][:]
+    def _load_from_slt_file(self):
+        self._result = [self._slt_group["INTENSITIES"][:]]
+        try:
+            self._result.append(self._slt_group["CONVOLUTION"][:])
+        except SltFileError:
+            pass
 
     #TODO: plot
     def _plot(self):
@@ -865,7 +870,7 @@ class SltPhononDispersion(_MultiProcessed):
     _method_type = "PHONON_DISPERSION"
 
     __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses", "_bandpath", "_modes_cutoff", "_x", "_x_coords", "_x_labels"]
-     
+ 
     def __init__(self, slt_group, hessian: ndarray, masses: ndarray, bandpath: BandPath, modes_cutoff: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
         super().__init__(slt_group, len(bandpath.kpts), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
         self._hessian = hessian
@@ -876,13 +881,16 @@ class SltPhononDispersion(_MultiProcessed):
         self._modes_cutoff = modes_cutoff
         self._args = [self._modes_cutoff]
         self._executor_proxy = _phonon_dispersion_proxy
-    
+
     def _load_args_arrays(self):
         masses = repeat(self._masses, 3)
         masses_inv_sqrt = 1.0 / sqrt(masses)
         masses_inv_sqrt = outer(masses_inv_sqrt, masses_inv_sqrt)
         self._args_arrays = [self._hessian[:], masses_inv_sqrt, self._kpts]
         self._result = empty((len(self._x), self._modes_cutoff), dtype=settings.float, order="C")
+
+    def _return(self):
+        return self._result, self._x, self._x_coords, self._x_labels, self._kpts
 
     def _save(self):
         self._metadata_dict = {
@@ -895,6 +903,7 @@ class SltPhononDispersion(_MultiProcessed):
             "X": (self._x, "Dataset containing X coordinates for the dispersion plotting."),
             "X_COORDS": (self._x_coords, "Dataset containing X coordiantes of the special point labels."),
             "X_LABELS": (self._x_labels, "Dataset containing the special point labels."),
+            "KPTS_PATH": (self._kpts, "Dataset containing the k-point path in the fractional coordinates of the reciprocal lattice.")
         }
 
     def _load_from_slt_file(self):
@@ -902,6 +911,7 @@ class SltPhononDispersion(_MultiProcessed):
         self._x = self._slt_group["X"][:]
         self._x_coords = self._slt_group["X_COORDS"][:]
         self._x_labels = self._slt_group["X_LABELS"][:]
+        self._kpts = self._slt_group["KPTS_PATH"][:]
 
     def _plot(self, **kwargs):
         plt.figure(figsize=(8, 6))
