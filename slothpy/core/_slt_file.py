@@ -1263,9 +1263,6 @@ class SltHessian(SltSuperCell):
     def animate_normal_modes(self):
         pass
 
-    # def array to shared:
-    # def hessian from cos tam, jakby argumenty delayed method mialy zmieniac
-
 
 ####################
 # Derivatives Groups

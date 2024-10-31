@@ -21,7 +21,7 @@ from numpy import ndarray, asarray, zeros, where, outer, sum, hstack, linspace, 
 from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import AU_BOHR_CM_1
 from slothpy._general_utilities._lapack import _cgemmt, _zgemmt
-from slothpy._general_utilities._math_expresions import _lorentzian, _gaussian
+from slothpy._general_utilities._math_expresions import _convolve_gaussian, _convolve_lorentzian
 
 def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None):
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=hessian.dtype)
@@ -48,20 +48,13 @@ def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarr
     if convolution is not None:
         frequency_range_convolution = zeros((5, resolution), dtype=hessian.dtype)
         frequency_range_convolution[0, :] = linspace(start_wavenumber, stop_wavenumber, resolution, dtype=hessian.dtype)
-    
-    #TODO: Move convolutions to numba when you eventually need them in a tight loop for dirac delta functions
 
         if convolution == "lorentzian":
             gamma = fwhm / 2
-            for i in range(1, 5):
-                for n in range(len(frequencies_intensities[0, :])):
-                    frequency_range_convolution[i, :] += _lorentzian(frequency_range_convolution[0, :], frequencies_intensities[0, n], gamma, frequencies_intensities[i, n])
-        
+            _convolve_lorentzian(frequencies_intensities, frequency_range_convolution, gamma)
         elif convolution == "gaussian":
             sigma = fwhm / (2 * sqrt(2 * log(2)))
-            for i in range(1, 5):
-                for n in range(len(frequencies_intensities[0, :])):
-                    frequency_range_convolution[i, :] += _gaussian(frequency_range_convolution[0, :], frequencies_intensities[0, n], sigma, frequencies_intensities[i, n])
+            _convolve_gaussian(frequencies_intensities, frequency_range_convolution, sigma)
 
         frequency_range_convolution[1:4,:] = frequency_range_convolution[1:4,:] / max(frequency_range_convolution[1:4,:])
         frequency_range_convolution[4,:] = frequency_range_convolution[4,:] / max(frequency_range_convolution[4,:])
