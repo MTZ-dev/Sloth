@@ -22,7 +22,7 @@ from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, log, 
 from slothpy.core._slothpy_exceptions import SltInputError, SltFileError, SltSaveError, SltWarning, slothpy_exc
 from slothpy._general_utilities._grids_over_hemisphere import lebedev_laikov_grid_over_hemisphere, fibonacci_over_hemisphere, meshgrid_over_hemisphere
 from slothpy._general_utilities._math_expresions import _normalize_grid_vectors, _normalize_orientations, _normalize_orientation
-from slothpy._general_utilities._constants import GREEN, BLUE, RESET, KB, H_CM_1, B_AU_T, F_AU_VM
+from slothpy._general_utilities._constants import GREEN, BLUE, RESET, KB, H_CM_1, B_AU_T, F_AU_VM, AU_BOHR_CM_1
 from slothpy._general_utilities._io import _group_exists
 from slothpy.core._config import settings
 
@@ -271,7 +271,25 @@ def validate_input(func):
                             raise ValueError(f"The modes' cutoff must be a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
                         elif value[0] > slt_group.attributes["Modes"]:
                             raise ValueError(f"Set the modes' cutoff to a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
-
+                    case "convolution":
+                        if value not in [None, "lorentzian", "gaussian"]:
+                            raise ValueError("The only valid options for the convolution are 'lorentzian', 'gaussian' or None.")
+                    case "fwhm":
+                        value = settings.float(value)
+                        if value <= 0:
+                            raise ValueError("FWHM must be greater than zero.")
+                    case "resolution":
+                        if not isinstance(value, (int, int32, int64)) or value <= 0:
+                            raise ValueError("Resolution of the spectra must be set to an integer greater than zero.")
+                    case "start_wavenumber":
+                        if value is not None:
+                            value = settings.float(value)
+                    case "stop_wavenumber":
+                        if value is not None:
+                            if bound_args.arguments["start_wavenumber"] is not None and value <= bound_args.arguments["start_wavenumber"]:
+                                raise ValueError("The stop_wavenumber must be strictly greater than the start_wavenumber.")
+                            value = settings.float(value)
+                
                 bound_args.arguments[name] = value
                 
         except Exception as exc:

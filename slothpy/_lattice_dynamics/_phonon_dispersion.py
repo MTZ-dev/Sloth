@@ -14,7 +14,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from numpy import array, where, sqrt, abs
+from numpy import asarray, where, sqrt, abs
 
 from slothpy.core._system import SharedMemoryArrayInfo, _load_shared_memory_arrays
 from slothpy.core._hessian_object import Hessian
@@ -24,7 +24,7 @@ def _phonon_dispersion_proxy(sm_arrays_info_list: list[SharedMemoryArrayInfo], a
     hessian = Hessian(sm_arrays_info_list[:2], args_list[0])
     sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list[2:])
     kpoints, progress_array, dispersion_array = arrays
-    au_bohr_cm_1 = array(AU_BOHR_CM_1, dtype=kpoints.dtype)
+    au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=kpoints.dtype)
     
     for i in range(start, end):
         hessian._kpoint = kpoints[i]

@@ -33,6 +33,7 @@ from slothpy._general_utilities._utils import slpjm_components_driver
 from slothpy._magnetism._zeeman import _zeeman_splitting_proxy
 from slothpy._magnetism._magnetisation import _magnetisation_proxy
 from slothpy._lattice_dynamics._phonon_dispersion import _phonon_dispersion_proxy
+from slothpy._lattice_dynamics._ir_spectrum import _ir_spectrum
 
 #################
 # SingleProcessed
@@ -535,12 +536,12 @@ class SltIrSpectrum(_SingleProcessed):
     _method_name = "IR Spectrum"
     _method_type = "IR_SPECTRUM"
 
-    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses", "_born_charges", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
+    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_born_charges", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
      
-    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
+    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
         super().__init__(slt_group, slt_save)
         self._hessian = hessian
-        self._masses = masses
+        self._masses_inv_sqrt = masses_inv_sqrt
         self._born_charges = born_charges
         self._start_wavenumber = start_wavenumber
         self._stop_wavenumber = stop_wavenumber
@@ -548,8 +549,8 @@ class SltIrSpectrum(_SingleProcessed):
         self._resolution = resolution
         self._fwhm = fwhm
 
-    def _executor(self): #return tuple wave spectrum etc
-        return _ir_spectrum(self._hessian, self._masses, self._born_charges, self._start_wavenumber, self._stop_wavenumber, self._convolution, self._resolution, self._fwhm)
+    def _executor(self):
+        return _ir_spectrum(self._hessian, self._masses_inv_sqrt, self._born_charges, self._start_wavenumber, self._stop_wavenumber, self._convolution, self._resolution, self._fwhm)
 
     def _save(self):
         self._metadata_dict = {
@@ -559,9 +560,9 @@ class SltIrSpectrum(_SingleProcessed):
             "Precision": settings.precision.upper(),
             "Description": f"IR intensities{"" if self._convolution is None else " and convoluted spectra"} calculated from Group '{self._group_name}'."
         }
-        self._data_dict = {"INTENSITIES": (self._result[0], f"")}
+        self._data_dict = {"INTENSITIES": (self._result[0], "Dataset containing mode frequencies in cm-1 and intensities for xyz polarizations in the form [freq, x, y, z, average].")}
         if self._convolution is not None:
-            self._data_dict["CONVOLUTION"] = (self._result[1], f"")
+            self._data_dict["CONVOLUTION"] = (self._result[1], f"Data set containing convoluted specta using {self._convolution} broadening with fwhm = {self._fwhm} in the form [wave_number, x, y, z, average].")
     
     def _load_from_slt_file(self):
         self._result = [self._slt_group["INTENSITIES"][:]]
@@ -572,7 +573,14 @@ class SltIrSpectrum(_SingleProcessed):
 
     #TODO: plot
     def _plot(self):
-        pass
+        plt.figure(figsize=(8, 6))
+        plt.plot(self._result[1][0], self._result[1][4], color='blue')
+        plt.vlines(x=self._result[0][0], ymin=0, ymax=self._result[0][4], color='red', linestyle='-')
+        plt.xlabel('Frequency (cm$^{-1}$)')
+        plt.ylabel('Absorbance (arb. units)')
+        plt.title('Simulated IR Spectrum at Gamma Point')
+        plt.grid(True)
+        plt.show()
 
     #TODO: df
     def _to_data_frame(self):
@@ -869,12 +877,12 @@ class SltPhononDispersion(_MultiProcessed):
     _method_name = "Phonon Dispersion"
     _method_type = "PHONON_DISPERSION"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses", "_bandpath", "_modes_cutoff", "_x", "_x_coords", "_x_labels"]
+    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses_inv_sqrt", "_bandpath", "_modes_cutoff", "_x", "_x_coords", "_x_labels"]
  
-    def __init__(self, slt_group, hessian: ndarray, masses: ndarray, bandpath: BandPath, modes_cutoff: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
+    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, bandpath: BandPath, modes_cutoff: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
         super().__init__(slt_group, len(bandpath.kpts), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
         self._hessian = hessian
-        self._masses = masses
+        self._masses_inv_sqrt = masses_inv_sqrt
         self._bandpath = bandpath
         self._kpts = bandpath.kpts.astype(settings.float)
         self._x, self._x_coords, self._x_labels = bandpath.get_linear_kpoint_axis()
@@ -883,10 +891,7 @@ class SltPhononDispersion(_MultiProcessed):
         self._executor_proxy = _phonon_dispersion_proxy
 
     def _load_args_arrays(self):
-        masses = repeat(self._masses, 3)
-        masses_inv_sqrt = 1.0 / sqrt(masses)
-        masses_inv_sqrt = outer(masses_inv_sqrt, masses_inv_sqrt)
-        self._args_arrays = [self._hessian[:], masses_inv_sqrt, self._kpts]
+        self._args_arrays = [self._hessian[:], outer(self._masses_inv_sqrt, self._masses_inv_sqrt), self._kpts]
         self._result = empty((len(self._x), self._modes_cutoff), dtype=settings.float, order="C")
 
     def _return(self):

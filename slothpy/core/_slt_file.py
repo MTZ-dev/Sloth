@@ -709,6 +709,8 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
     def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, modes_cutoff: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion: pass
 
+    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: Optional[float] = None, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum: pass
+    
     def states_energies_cm_1(self, start_state=0, stop_state=0, slt_save=None) -> SltStatesEnergiesCm1: pass
     
     def states_energies_au(self, start_state=0, stop_state=0, slt_save=None) -> SltStatesEnergiesAu: pass
@@ -1233,7 +1235,7 @@ class SltHessian(SltSuperCell):
         super().__init__(slt_group)
 
     @property
-    def masess(self):
+    def masses(self):
         return self.atoms_object().get_masses()[:self.hessian().shape[3]//3].astype(settings.float)
 
     def hessian(self) -> ndarray:
@@ -1245,15 +1247,18 @@ class SltHessian(SltSuperCell):
         else:
             raise RuntimeError(f"Hessian from {BLUE}Group{RESET}: '{self._slt_group._group_name}' {GREEN}File{RESET}: '{self._slt_group._hdf5}' does not have born charges loaded.")
     
+    def _masses_inv_sqrt(self):
+        return 1.0 / sqrt(repeat(self.masses, 3))
+
     def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, modes_cutoff: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion:
         self._bandpath = self.atoms_object().cell.bandpath(path=brillouin_zone_path, npoints=npoints, special_points=special_points, density=density, eps=symmetry_eps)
-        return SltPhononDispersion(self._slt_group, self.hessian(), self.masess, self._bandpath, modes_cutoff, number_cpu, number_threads, autotune, slt_save)
+        return SltPhononDispersion(self._slt_group, self.hessian(), self._masses_inv_sqrt(), self._bandpath, modes_cutoff, number_cpu, number_threads, autotune, slt_save)
 
     def phonon_density_of_states(self):
         pass # plus raman second order
 
-    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", fwhm: float = None, resolution: int = None, slt_save: str = None) -> SltIrSpectrum:
-        return SltIrSpectrum(self._slt_group, self.hessian(), self.masess, asfortranarray(self.born_charges, dtype=settings.complex), start_wavenumber, stop_wavenumber, convolution, resolution, fwhm, slt_save)
+    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: Optional[float] = None, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum:
+        return SltIrSpectrum(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), asfortranarray(self.born_charges()[:], dtype=settings.complex), start_wavenumber, stop_wavenumber, convolution, resolution, fwhm, slt_save)
 
     def animate_normal_modes(self):
         pass

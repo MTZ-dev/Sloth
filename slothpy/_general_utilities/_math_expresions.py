@@ -15,11 +15,19 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from math import factorial
-from numpy import ndarray, array, zeros, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, mod, sqrt, min, max, power, float64 as np_float64, int64 as np_int64, min as np_min
+from numpy import ndarray, array, zeros, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, mod, sqrt, min, max, power, float64 as np_float64, int64 as np_int64, min as np_min, exp, pi
 from numpy.linalg import eigh, inv
 from numba import jit, prange, types, int64, float32, float64, complex64, complex128
 from slothpy._general_utilities._constants import GE, MU_B_AU
 from slothpy.core._slothpy_exceptions import SltInputError
+
+def _lorentzian(x, mu, gamma, area):
+    return area * (gamma) / (pi) / ((x - mu)**2 + gamma**2)
+
+
+def _gaussian(x, mu, sigma, area):
+    normalization = area / (sigma * sqrt(2 * pi))
+    return normalization * exp(-0.5 * ((x - mu) / sigma) ** 2)
 
 
 @jit(

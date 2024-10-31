@@ -24,9 +24,12 @@ class Hessian():
     
     __slots__ = ["_sm", "_hessian", "_masses_inv_sqrt", "_kpoint", "_modes_cutoff", "_heevr_lwork", "_heevr", "_lwork", "_dtype_array"]
 
-    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], modes_cutoff: int):
-        sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list)
-        self._sm = sm
+    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], modes_cutoff: int = 0, single_process: bool = False):
+        if single_process:
+            arrays = sm_arrays_info_list
+        else:
+            sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list)
+            self._sm = sm
         self._hessian = arrays[0]
         self._masses_inv_sqrt = arrays[1]
         self._kpoint = None
@@ -50,10 +53,10 @@ class Hessian():
             self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='N', range='I', il=1, iu=self._modes_cutoff)
         return self._heevr(self.build_dynamical_matrix().T, *self._lwork, jobz='N', range='I', il=1, iu=self._modes_cutoff)
     
-    def eigenvectors_frequencies_squared(self, frequency_cutoff: float = None):
+    def frequencies_squared_eigenvectors(self, frequency_start: float = 0, frequency_stop: float = 0):
         if self._lwork is None:
-            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='V', range='I' if frequency_cutoff is None else 'V', il=1, iu=self._modes_cutoff, vu=frequency_cutoff)
-        return self._heevr(self.build_dynamical_matrix().T, *self._lwork, jobz='V', range='I' if frequency_cutoff is None else 'V', il=1, iu=self._modes_cutoff, vu=frequency_cutoff)
+            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='V', range='I' if (self._modes_cutoff != 0) else 'V', il=1, iu=self._modes_cutoff, vl=frequency_start, vu=frequency_stop)
+        return self._heevr(self.build_dynamical_matrix().T, *self._lwork, jobz='V', range='I' if (self._modes_cutoff != 0) else 'V', il=1, iu=self._modes_cutoff, vl=frequency_start, vu=frequency_stop)
 
     # def e_under_fields(self):
     #     if self._number_of_centers > 1:

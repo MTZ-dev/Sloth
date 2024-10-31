@@ -286,7 +286,7 @@ def save_dict_to_group(group, data_dict, subgroup_name):
 def _get_orca_blocks_size(orca_filepath: str) -> tuple[int, int, int]:
     
     with open(orca_filepath, "r") as file:
-        regex = compile("SOC MATRIX \(A\.U\.\)\n")
+        regex = compile(r"SOC MATRIX \(A\.U\.\)\n")
         so_dim = -1
         for line in file:
             if regex.search(line):

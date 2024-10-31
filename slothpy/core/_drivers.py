@@ -89,7 +89,7 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
     def _executor():
         pass
     
-    @slothpy_exc("SltCompError")
+    # @slothpy_exc("SltCompError")
     def run(self):
         if not self._ready:
             with threadpool_limits(limits=settings.number_cpu):
@@ -128,7 +128,7 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
     def _plot(self, show=True):
         pass
 
-    @slothpy_exc("SltPlotError")
+    # @slothpy_exc("SltPlotError")
     @ensure_ready
     def plot(self, *args, **kwargs):
         self._plot(*args, **kwargs)
