@@ -707,7 +707,9 @@ class SltGroup(metaclass=MethodDelegateMeta):
         """
         pass
 
-    def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, modes_cutoff: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion: pass
+    def phonon_frequencies(self, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], start_mode: Optional[int] = 0, stop_mode: Optional[int] = 0, slt_save: str = None) -> SltPhononFrequencies: pass
+
+    def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion: pass
 
     def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: Optional[float] = None, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum: pass
     
@@ -1249,10 +1251,13 @@ class SltHessian(SltSuperCell):
     
     def _masses_inv_sqrt(self):
         return 1.0 / sqrt(repeat(self.masses, 3))
+    
+    def phonon_frequencies(self, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], start_mode: Optional[int] = None, stop_mode: Optional[int] = None, slt_save: str = None) -> SltPhononFrequencies:
+        return SltPhononFrequencies(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), kpoint, start_mode, stop_mode, slt_save)
 
-    def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, modes_cutoff: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion:
+    def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion:
         self._bandpath = self.atoms_object().cell.bandpath(path=brillouin_zone_path, npoints=npoints, special_points=special_points, density=density, eps=symmetry_eps)
-        return SltPhononDispersion(self._slt_group, self.hessian(), self._masses_inv_sqrt(), self._bandpath, modes_cutoff, number_cpu, number_threads, autotune, slt_save)
+        return SltPhononDispersion(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), self._bandpath, start_mode, stop_mode, number_cpu, number_threads, autotune, slt_save)
 
     def phonon_density_of_states(self):
         pass # plus raman second order

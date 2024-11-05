@@ -25,14 +25,13 @@ from slothpy._general_utilities._math_expresions import _convolve_gaussian, _con
 
 def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None):
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=hessian.dtype)
-    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], single_process=True)
-    hessian_object._kpoint = asarray([0., 0., 0.], dtype=hessian.dtype)
-
     start_wavenumber_au = start_wavenumber / au_bohr_cm_1
     stop_wavenumber_au = stop_wavenumber / au_bohr_cm_1
     start_wavenumber_au = start_wavenumber_au * start_wavenumber_au if start_wavenumber_au >= 0 else -start_wavenumber_au * start_wavenumber_au
     stop_wavenumber_au = stop_wavenumber_au * stop_wavenumber_au if stop_wavenumber_au >= 0 else -stop_wavenumber_au * stop_wavenumber_au
-    frequencies_squared, eigenvectors = hessian_object.frequencies_squared_eigenvectors(start_wavenumber_au, stop_wavenumber_au)
+    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], kpoint=asarray([0., 0., 0.], dtype=hessian.dtype), start_frequency=start_wavenumber_au, stop_frequency=stop_wavenumber_au, single_process=True)
+
+    frequencies_squared, eigenvectors = hessian_object.frequencies_squared_eigenvectors
     frequencies = where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared))) * au_bohr_cm_1
 
     born_charges_weighted = born_charges * masses_inv_sqrt[:, None]

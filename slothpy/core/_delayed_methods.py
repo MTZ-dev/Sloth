@@ -32,8 +32,9 @@ from slothpy._general_utilities._constants import H_CM_1
 from slothpy._general_utilities._utils import slpjm_components_driver
 from slothpy._magnetism._zeeman import _zeeman_splitting_proxy
 from slothpy._magnetism._magnetisation import _magnetisation_proxy
-from slothpy._lattice_dynamics._phonon_dispersion import _phonon_dispersion_proxy
+from slothpy._lattice_dynamics._phonon_frequencies import _phonon_frequencies
 from slothpy._lattice_dynamics._ir_spectrum import _ir_spectrum
+from slothpy._lattice_dynamics._phonon_dispersion import _phonon_dispersion_proxy
 
 #################
 # SingleProcessed
@@ -532,6 +533,45 @@ class SltStatesMagneticDipoleMomenta(_SingleProcessed):
         pass
 
 
+class SltPhononFrequencies(_SingleProcessed):
+    _method_name = "Phonon Frequencies"
+    _method_type = "PHONON_FREQUENCIES"
+
+    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_kpoint", "_start_mode", "_stop_mode"]
+     
+    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarray, start_mode: int, stop_mode: int, slt_save: str = None) -> None:
+        super().__init__(slt_group, slt_save)
+        self._hessian = hessian
+        self._masses_inv_sqrt = masses_inv_sqrt
+        self._kpoint = kpoint
+        self._start_mode = start_mode
+        self._stop_mode = stop_mode
+
+    def _executor(self):
+        return _phonon_frequencies(self._hessian, self._masses_inv_sqrt, self._kpoint, self._start_mode, self._stop_mode)
+
+    def _save(self):
+        self._metadata_dict = {
+            "Type": self._method_type,
+            "States": self._result[0].shape[0],
+            "Precision": settings.precision.upper(),
+            "Description": f"{self._method_name} calculated from Group '{self._group_name}'."
+        }
+        self._data_dict = {"FREQUENCIES": (self._result[1], "Dataset containing mode frequencies in cm-1."),
+                           "MODE_NUMBER": (self._result[0], "Dataset containing mode numbers corresponding to the calculated frequencies.")}
+
+    def _load_from_slt_file(self):
+        self._result = (self._slt_group["MODE_NUMBER"][:], self._slt_group["FREQUENCIES"][:])
+
+    #TODO: plot
+    def _plot(self):
+        pass
+
+    #TODO: df
+    def _to_data_frame(self):
+        pass
+
+
 class SltIrSpectrum(_SingleProcessed):
     _method_name = "IR Spectrum"
     _method_type = "IR_SPECTRUM"
@@ -877,22 +917,23 @@ class SltPhononDispersion(_MultiProcessed):
     _method_name = "Phonon Dispersion"
     _method_type = "PHONON_DISPERSION"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses_inv_sqrt", "_bandpath", "_modes_cutoff", "_x", "_x_coords", "_x_labels"]
+    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses_inv_sqrt", "_bandpath", "_start_mode", "_stop_mode", "_x", "_x_coords", "_x_labels"]
  
-    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, bandpath: BandPath, modes_cutoff: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
+    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, bandpath: BandPath, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
         super().__init__(slt_group, len(bandpath.kpts), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
         self._hessian = hessian
         self._masses_inv_sqrt = masses_inv_sqrt
         self._bandpath = bandpath
         self._kpts = bandpath.kpts.astype(settings.float)
         self._x, self._x_coords, self._x_labels = bandpath.get_linear_kpoint_axis()
-        self._modes_cutoff = modes_cutoff
-        self._args = [self._modes_cutoff]
+        self._start_mode = start_mode
+        self._stop_mode = stop_mode
+        self._args = [self._start_mode, self._stop_mode]
         self._executor_proxy = _phonon_dispersion_proxy
 
     def _load_args_arrays(self):
-        self._args_arrays = [self._hessian[:], outer(self._masses_inv_sqrt, self._masses_inv_sqrt), self._kpts]
-        self._result = empty((len(self._x), self._modes_cutoff), dtype=settings.float, order="C")
+        self._args_arrays = [self._hessian, outer(self._masses_inv_sqrt, self._masses_inv_sqrt), self._kpts]
+        self._result = empty((len(self._x), self._stop_mode - self._start_mode), dtype=settings.float, order="C")
 
     def _return(self):
         return self._result, self._x, self._x_coords, self._x_labels, self._kpts

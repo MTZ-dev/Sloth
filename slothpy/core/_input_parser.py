@@ -267,10 +267,31 @@ def validate_input(func):
                     case "modes_cutoff":
                         if value == 0:
                             value = int(slt_group.attributes["Modes"])
-                        elif not isinstance(value, (int, int32, int64)) or value[0] < 0:
+                        elif not isinstance(value, (int, int32, int64)) or value < 0:
                             raise ValueError(f"The modes' cutoff must be a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
-                        elif value[0] > slt_group.attributes["Modes"]:
+                        if value > slt_group.attributes["Modes"]:
                             raise ValueError(f"Set the modes' cutoff to a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
+                    case "start_mode":
+                        if not isinstance(value, (int, int32, int64)) or value < 0:
+                            raise ValueError(f"The start mode number must be a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
+                        elif value > slt_group.attributes["Modes"]:
+                            raise ValueError(f"Set the starrt mode number to a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
+                    case "stop_mode":
+                        if value == 0:
+                            value = int(slt_group.attributes["Modes"])
+                        elif not isinstance(value, (int, int32, int64)) or value < 0:
+                            raise ValueError(f"The stop mode number must be a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
+                        if value > slt_group.attributes["Modes"]:
+                            raise ValueError(f"Set the stop mode number to a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
+                        if value < bound_args.arguments["start_mode"]:
+                            raise ValueError("The stop mode number must be greater or equal to the start mode number.")
+                    case "kpoint":
+                        try:
+                            value = asarray(value, order='C', dtype=settings.float)
+                        except Exception:
+                            raise ValueError("K-point must be an arraylike object of floats.")
+                        if value.shape != (3,):
+                            raise ValueError("The k-point must have shape (3,).")
                     case "convolution":
                         if value not in [None, "lorentzian", "gaussian"]:
                             raise ValueError("The only valid options for the convolution are 'lorentzian', 'gaussian' or None.")

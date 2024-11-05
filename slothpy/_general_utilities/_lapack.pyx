@@ -33,7 +33,7 @@ from scipy.linalg.cython_lapack cimport zheevr, cheevr
 
 @boundscheck(False)
 @wraparound(False)
-def _zheevr_lwork(int n, jobz ='N', range='A', int il=0, int iu=0, cnp.float64_t vl=-1e30, cnp.float64_t vu=0):
+def _zheevr_lwork(int n, jobz ='N', range='A', int il=1, int iu=0, cnp.float64_t vl=-1e308, cnp.float64_t vu=1e308):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
         char range_char = range.encode('ascii')[0]
@@ -60,11 +60,15 @@ def _zheevr_lwork(int n, jobz ='N', range='A', int il=0, int iu=0, cnp.float64_t
     if range == 'A':
         isuppz = cnp.PyArray_EMPTY(1, [2*n], cnp.NPY_INT32, 1)
     elif range == 'I':
+        if iu == 0:
+            iu = n
         isuppz = cnp.PyArray_EMPTY(1, [2*(iu-il+1)], cnp.NPY_INT32, 1)
     else:
         isuppz = cnp.PyArray_EMPTY(1, [1], cnp.NPY_INT32, 1)
     if jobz == 'V':
         if range == 'I':
+            if iu == 0:
+                iu = n
             z = cnp.PyArray_EMPTY(2, [n, iu-il+1], cnp.NPY_COMPLEX128, 1)
         else:
             z = cnp.PyArray_EMPTY(2, [n, n], cnp.NPY_COMPLEX128, 1)
@@ -93,7 +97,7 @@ def _zheevr_lwork(int n, jobz ='N', range='A', int il=0, int iu=0, cnp.float64_t
 
 @boundscheck(False)
 @wraparound(False)
-def _zheevr(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] a, int lwork, int lrwork, int liwork, jobz='N', range='A', int il=0, int iu=0, cnp.float64_t vl=-1e30, cnp.float64_t vu=0):
+def _zheevr(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] a, int lwork, int lrwork, int liwork, jobz='N', range='A', int il=1, int iu=0, cnp.float64_t vl=-1e30, cnp.float64_t vu=0):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
         char range_char = range.encode('ascii')[0]
@@ -118,11 +122,15 @@ def _zheevr(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] a, int lwork, 
     if range == 'A':
         isuppz = cnp.PyArray_EMPTY(1, [2*n], cnp.NPY_INT32, 1)
     elif range == 'I':
+        if iu == 0:
+            iu = n
         isuppz = cnp.PyArray_EMPTY(1, [2*(iu-il+1)], cnp.NPY_INT32, 1)
     else:
         isuppz = cnp.PyArray_EMPTY(1, [1], cnp.NPY_INT32, 1)
     if jobz == 'V':
         if range == 'I':
+            if iu == 0:
+                iu = n
             z = cnp.PyArray_EMPTY(2, [n, iu-il+1], cnp.NPY_COMPLEX128, 1)
         else:
             z = cnp.PyArray_EMPTY(2, [n, n], cnp.NPY_COMPLEX128, 1)
@@ -248,7 +256,7 @@ def _zgemmt(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] M, cnp.ndarray
 
 @boundscheck(False)
 @wraparound(False)
-def _cheevr_lwork(int n, jobz='N', range='A', int il=0, int iu=0, cnp.float32_t vl=-1e30, cnp.float32_t vu=0):
+def _cheevr_lwork(int n, jobz='N', range='A', int il=1, int iu=0, cnp.float32_t vl=-1e38, cnp.float32_t vu=1e38):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
         char range_char = range.encode('ascii')[0]
@@ -275,11 +283,15 @@ def _cheevr_lwork(int n, jobz='N', range='A', int il=0, int iu=0, cnp.float32_t 
     if range == 'A':
         isuppz = cnp.PyArray_EMPTY(1, [2*n], cnp.NPY_INT32, 1)
     elif range == 'I':
+        if iu == 0:
+            iu = n
         isuppz = cnp.PyArray_EMPTY(1, [2*(iu-il+1)], cnp.NPY_INT32, 1)
     else:
         isuppz = cnp.PyArray_EMPTY(1, [1], cnp.NPY_INT32, 1)
     if jobz == 'V':
         if range == 'I':
+            if iu == 0:
+                iu = n
             z = cnp.PyArray_EMPTY(2, [n, iu-il+1], cnp.NPY_COMPLEX64, 1)
         else:
             z = cnp.PyArray_EMPTY(2, [n, n], cnp.NPY_COMPLEX64, 1)
@@ -308,7 +320,7 @@ def _cheevr_lwork(int n, jobz='N', range='A', int il=0, int iu=0, cnp.float32_t 
 
 @boundscheck(False)
 @wraparound(False)
-def _cheevr(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] a, int lwork, int lrwork, int liwork, jobz='N', range='A', int il=0, int iu=0, cnp.float32_t vl=-1e30, cnp.float32_t vu=0):
+def _cheevr(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] a, int lwork, int lrwork, int liwork, jobz='N', range='A', int il=1, int iu=0, cnp.float32_t vl=-1e30, cnp.float32_t vu=0):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
         char range_char = range.encode('ascii')[0]
@@ -334,11 +346,15 @@ def _cheevr(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] a, int lwork, i
     if range == 'A':
         isuppz = cnp.PyArray_EMPTY(1, [2*n], cnp.NPY_INT32, 1)
     elif range == 'I':
+        if iu == 0:
+            iu = n
         isuppz = cnp.PyArray_EMPTY(1, [2*(iu-il+1)], cnp.NPY_INT32, 1)
     else:
         isuppz = cnp.PyArray_EMPTY(1, [1], cnp.NPY_INT32, 1)
     if jobz == 'V':
         if range == 'I':
+            if iu == 0:
+                iu = n
             z = cnp.PyArray_EMPTY(2, [n, iu-il+1], cnp.NPY_COMPLEX64, 1)
         else:
             z = cnp.PyArray_EMPTY(2, [n, n], cnp.NPY_COMPLEX64, 1)

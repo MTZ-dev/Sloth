@@ -21,14 +21,14 @@ from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import AU_BOHR_CM_1
 
 def _phonon_dispersion_proxy(sm_arrays_info_list: list[SharedMemoryArrayInfo], args_list, process_index, start: int, end: int):
-    hessian = Hessian(sm_arrays_info_list[:2], args_list[0])
+    hessian = Hessian(sm_arrays_info_list[:2], start_mode=args_list[0], stop_mode=args_list[1])
     sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list[2:])
     kpoints, progress_array, dispersion_array = arrays
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=kpoints.dtype)
     
     for i in range(start, end):
         hessian._kpoint = kpoints[i]
-        frequencies_squared = hessian.frequencies_squared()
+        frequencies_squared = hessian.frequencies_squared
         frequencies = where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared))) * au_bohr_cm_1
         dispersion_array[i, :] = frequencies
         progress_array[process_index] += 1
