@@ -617,6 +617,8 @@ class SltIrSpectrum(_SingleProcessed):
 
     #TODO: plot
     def _plot(self):
+        # You can add info about FWHM which I left in the attributes
+        # This works only for the convolution calculation
         plt.figure(figsize=(8, 6))
         plt.plot(self._result[1][0], self._result[1][4], color='blue')
         plt.vlines(x=self._result[0][0], ymin=0, ymax=self._result[0][4], color='red', linestyle='-')
@@ -1026,13 +1028,13 @@ class SltPhononDensityOfStates(_MultiProcessed):
             if self._convolution == "lorentzian":
                 gamma = self._fwhm / 2
                 convolution = _convolve_lorentzian(frequencies, intensities, frequency_range, gamma)
-                return frequency_range, convolution / max(convolution)
+                return bin_edges, hist / max(hist), frequency_range, convolution / max(convolution)
             
             elif self._convolution == "gaussian":
                 sigma = self._fwhm / (2 * sqrt(2 * log(2)))
                 convolution = _convolve_gaussian(frequencies, intensities, frequency_range, sigma)
 
-                return frequency_range, convolution / max(convolution)
+                return bin_edges, hist / max(hist), frequency_range, convolution / max(convolution)
 
     def _save(self):
         self._metadata_dict = {
@@ -1050,8 +1052,10 @@ class SltPhononDensityOfStates(_MultiProcessed):
         else:
             self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm-1 Type = {self._convolution}"
             self._data_dict = {
-                "FREQUENCIES": (self._result[0], "Dataset containing frequencies in cm-1 for the phonon DOS."),
-                "CONVOLUTION": (self._result[1], f"Dataset containing phonon DOS with {self._convolution} broadening, where FWHM = {self._fwhm} cm-1."),
+                "BIN_EDGES": (self._result[0], "Dataset containing bin edges in cm-1 for the histogram of phonon DOS."),
+                "HISTOGRAM": (self._result[1], "Dataset containing histogram of the phonon DOS."),
+                "FREQUENCIES": (self._result[2], "Dataset containing frequencies in cm-1 for the phonon DOS."),
+                "CONVOLUTION": (self._result[3], f"Dataset containing phonon DOS with {self._convolution} broadening, where FWHM = {self._fwhm} cm-1."),
                 "KPTS_GRID": (self._kpoints_grid, "Dataset containing the k-point grid in the fractional coordinates of the reciprocal lattice used for the phonon DOS calculation.")
             }
 
@@ -1061,7 +1065,7 @@ class SltPhononDensityOfStates(_MultiProcessed):
             self._kpoints_grid = self._slt_group["KPTS_GRID"][:]
             self._convolution = None
         else:
-            self._result = (self._slt_group["FREQUENCIES"][:], self._slt_group["CONVOLUTION"][:])
+            self._result = (self._slt_group["BIN_EDGES"][:], self._slt_group["HISTOGRAM"][:], self._slt_group["FREQUENCIES"][:], self._slt_group["CONVOLUTION"][:])
             self._kpoints_grid = self._slt_group["KPTS_GRID"][:]
             self._convolution = True
 
@@ -1075,8 +1079,14 @@ class SltPhononDensityOfStates(_MultiProcessed):
             plt.grid(True, linestyle='--', alpha=0.5)
             plt.show()
         else:
+            # You can add info about FWHM which I left in the attributes
             plt.figure(figsize=(8, 6))
-            plt.plot(self._result[0], self._result[1], color='blue')
+            plt.bar(self._result[0][:-1], self._result[1], width=diff(self._result[0]), edgecolor='black', alpha=0.7)
+            plt.xlabel('Frequency (cm$^{-1}$)')
+            plt.ylabel('Counts')
+            plt.title('Intermediate Histogram of Phonon Frequencies')
+            plt.grid(True, linestyle='--', alpha=0.5)
+            plt.plot(self._result[2], self._result[3], color='blue')
             plt.xlabel('Frequency (cm$^{-1}$)')
             plt.ylabel('Density of States (arb. units)')
             plt.title('Phonon Density of States')

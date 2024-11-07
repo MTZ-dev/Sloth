@@ -711,9 +711,9 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
     def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion: pass
 
-    def phonon_density_of_states(self, kpoints_grid: Union[int, ndarray], start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 5, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDensityOfStates: pass
+    def phonon_density_of_states(self, kpoints_grid: Union[int, ndarray], start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDensityOfStates: pass
 
-    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 5, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum: pass
+    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum: pass
     
     def states_energies_cm_1(self, start_state=0, stop_state=0, slt_save=None) -> SltStatesEnergiesCm1: pass
     
@@ -1261,10 +1261,10 @@ class SltHessian(SltSuperCell):
         self._bandpath = self.atoms_object().cell.bandpath(path=brillouin_zone_path, npoints=npoints, special_points=special_points, density=density, eps=symmetry_eps)
         return SltPhononDispersion(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), self._bandpath, start_mode, stop_mode, number_cpu, number_threads, autotune, slt_save)
 
-    def phonon_density_of_states(self, kpoints_grid: Union[int, ndarray], start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 5, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDensityOfStates:
+    def phonon_density_of_states(self, kpoints_grid: Union[int, ndarray], start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDensityOfStates:
         return SltPhononDensityOfStates(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), kpoints_grid, start_wavenumber, stop_wavenumber, resolution, convolution, fwhm, number_cpu, number_threads, autotune, slt_save)
 
-    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 5, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum:
+    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum:
         return SltIrSpectrum(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), asfortranarray(self.born_charges()[:], dtype=settings.complex), start_wavenumber, stop_wavenumber, convolution, resolution, fwhm, slt_save)
 
     def animate_normal_modes(self):
