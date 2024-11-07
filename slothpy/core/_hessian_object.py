@@ -14,16 +14,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from numpy import ndarray, finfo, empty, float64, float32, complex64, complex128
+from typing import Literal
+
+from numpy import ndarray, finfo, empty, where, abs, sqrt, float64, float32, complex64, complex128
 
 from slothpy.core._system import SharedMemoryArrayInfo, _load_shared_memory_arrays
 from slothpy._general_utilities._numba_methods import _dynamical_matrix
 
 class Hessian():
     
-    __slots__ = ["_sm", "_hessian", "_masses_inv_sqrt", "_kpoint", "_heevr_lwork", "_heevr", "_lwork", "_il", "_iu", "_vl", "_vu", "_dtype_array"]
+    __slots__ = ["_sm", "_hessian", "_masses_inv_sqrt", "_kpoint", "_heevr_lwork", "_heevr", "_lwork", "_il", "_iu", "_vl", "_vu", "_range", "_dtype_array"]
 
-    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], kpoint: ndarray = None, start_mode: int = 0, stop_mode: int = 0, start_frequency: float = None, stop_frequency: float = None, single_process: bool = False):
+    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], kpoint: ndarray = None, start_mode: int = 0, stop_mode: int = 0, start_frequency: float = None, stop_frequency: float = None, single_process: bool = False, eigen_range: Literal["I", "V"] = "I"):
         if single_process:
             arrays = sm_arrays_info_list
         else:
@@ -42,6 +44,7 @@ class Hessian():
         self._iu = stop_mode
         self._vl = finfo(self._hessian.dtype).min if start_frequency is None else start_frequency
         self._vu = finfo(self._hessian.dtype).max if stop_frequency is None else stop_frequency
+        self._range = eigen_range
         if self._hessian.dtype == float32:
             self._dtype_array = empty(1, dtype=complex64)
         else:
@@ -52,16 +55,21 @@ class Hessian():
         return _dynamical_matrix(self._hessian, self._masses_inv_sqrt, self._kpoint, self._dtype_array).T
 
     @property
-    def frequencies_squared(self):
+    def frequencies(self):
         if self._lwork is None:
-            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='N', range='I', il=self._il, iu=self._iu)
-        return self._heevr(self.build_dynamical_matrix, *self._lwork, jobz='N', range='I', il=self._il, iu=self._iu)
-    
+            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='N', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
+        frequencies_squared = self._heevr(self.build_dynamical_matrix, *self._lwork, jobz='N', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
+
+        return where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared)))
+
     @property
-    def frequencies_squared_eigenvectors(self):
+    def frequencies_eigenvectors(self):
         if self._lwork is None:
-            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='V', range='V', vl=self._vl, vu=self._vu)
-        return self._heevr(self.build_dynamical_matrix, *self._lwork, jobz='V', range='V', vl=self._vl, vu=self._vu)
+            self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='V', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
+        frequencies_squared, eigenvectors = self._heevr(self.build_dynamical_matrix, *self._lwork, jobz='V', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
+
+        return where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared))), eigenvectors
+    
 
     
 

@@ -71,11 +71,10 @@ class SltProcessPool:
                         break
                 sleep(0.2)
             else:
+                if self._returns:
+                    self._result = self._gather_results(self._result_queue, len(self._processes))
                 for process in self._processes:
                     process.join()
-            
-            if self._returns:
-                self._result = self._gather_results(self._result_queue)
 
         return self._result
     

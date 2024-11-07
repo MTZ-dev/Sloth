@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from math import factorial
-from numpy import ndarray, array, zeros, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, mod, sqrt, min, max, power, int64 as np_int64, min as np_min, exp, pi
+from numpy import ndarray, array, zeros, zeros_like, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, mod, sqrt, min, max, power, int64 as np_int64, min as np_min, exp, pi
 from numpy.linalg import eigh, inv
 from numba import jit, prange, types, int64, float32, float64, complex64, complex128
 from slothpy._general_utilities._constants import GE, MU_B_AU
@@ -35,7 +35,7 @@ def _gaussian(x, mu, sigma):
 
 
 @jit([types.void(types.Array(float32, 2, 'C', readonly=True), types.Array(float32, 2, 'C'), float32), types.void(types.Array(float64, 2, 'C', readonly=True), types.Array(float64, 2, 'C'), float64)], nopython=True, nogil=True, cache=True, fastmath=True, parallel=True)
-def _convolve_lorentzian(frequencies_intensities, frequency_range_convolution, gamma):
+def _convolve_lorentzian_xyz(frequencies_intensities, frequency_range_convolution, gamma):
     for i in prange(1, 5):
         for n in range(frequencies_intensities.shape[1]):
             for k in range(frequency_range_convolution[0].shape[0]):
@@ -43,11 +43,31 @@ def _convolve_lorentzian(frequencies_intensities, frequency_range_convolution, g
 
 
 @jit([types.void(types.Array(float32, 2, 'C', readonly=True), types.Array(float32, 2, 'C'), float32), types.void(types.Array(float64, 2, 'C', readonly=True), types.Array(float64, 2, 'C'), float64)], nopython=True, nogil=True, cache=True, fastmath=True, parallel=True)
-def _convolve_gaussian(frequencies_intensities, frequency_range_convolution, sigma):
+def _convolve_gaussian_xyz(frequencies_intensities, frequency_range_convolution, sigma):
     for i in prange(1, 5):
         for n in range(frequencies_intensities.shape[1]):
             for k in range(frequency_range_convolution[0].shape[0]):
                 frequency_range_convolution[i, k] += frequencies_intensities[i, n] * _gaussian(frequency_range_convolution[0, k], frequencies_intensities[0, n], sigma)
+
+
+@jit([types.Array(float32, 1, 'C')(types.Array(float32, 1, 'C', readonly=True), types.Array(float32, 1, 'C'), types.Array(float32, 1, 'C'), float32), types.Array(float64, 1, 'C')(types.Array(float64, 1, 'C'), types.Array(float64, 1, 'C', readonly=True), types.Array(float64, 1, 'C'), float64)], nopython=True, nogil=True, cache=True, fastmath=True, parallel=True)
+def _convolve_lorentzian(frequencies, intensities, frequency_range, gamma):
+    convolution = zeros_like(frequency_range)
+    for n in range(frequencies.shape[0]):
+        for k in prange(frequency_range.shape[0]):
+            convolution[k] += intensities[n] * _lorentzian(frequency_range[k], frequencies[n], gamma)
+    
+    return convolution
+
+
+@jit([types.Array(float32, 1, 'C')(types.Array(float32, 1, 'C', readonly=True), types.Array(float32, 1, 'C'), types.Array(float32, 1, 'C'), float32), types.Array(float64, 1, 'C')(types.Array(float64, 1, 'C'), types.Array(float64, 1, 'C', readonly=True), types.Array(float64, 1, 'C'), float64)], nopython=True, nogil=True, cache=True, fastmath=True, parallel=True)
+def _convolve_gaussian(frequencies, intensities, frequency_range, sigma):
+    convolution = zeros_like(frequency_range)
+    for n in range(frequencies.shape[0]):
+        for k in prange(frequency_range.shape[0]):
+            convolution[k] += intensities[n] * _gaussian(frequency_range[k], frequencies[n], sigma)
+
+    return convolution
 
 
 @jit(

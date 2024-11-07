@@ -19,7 +19,7 @@ from typing import Literal, Union, Optional
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.synchronize import Event
 
-from numpy import ndarray, outer, zeros, empty, repeat, sqrt
+from numpy import ndarray, asarray, outer, zeros, empty, histogram, diff, linspace, sign, sqrt, min, max, log
 from pandas import DataFrame
 import matplotlib.pyplot as plt
 from ase.dft.kpoints import BandPath
@@ -28,13 +28,15 @@ from slothpy.core._config import settings
 from slothpy.core._slothpy_exceptions import SltCompError, SltFileError
 from slothpy.core._drivers import _SingleProcessed, _MultiProcessed, ensure_ready
 from slothpy._general_utilities._constants import RED, BLUE, GREEN, RESET
-from slothpy._general_utilities._constants import H_CM_1
+from slothpy._general_utilities._constants import H_CM_1, AU_BOHR_CM_1
 from slothpy._general_utilities._utils import slpjm_components_driver
+from slothpy._general_utilities._math_expresions import _convolve_gaussian, _convolve_lorentzian
 from slothpy._magnetism._zeeman import _zeeman_splitting_proxy
 from slothpy._magnetism._magnetisation import _magnetisation_proxy
 from slothpy._lattice_dynamics._phonon_frequencies import _phonon_frequencies
 from slothpy._lattice_dynamics._ir_spectrum import _ir_spectrum
 from slothpy._lattice_dynamics._phonon_dispersion import _phonon_dispersion_proxy
+from slothpy._lattice_dynamics._phonon_density_of_states import _phonon_density_of_states_proxy
 
 #################
 # SingleProcessed
@@ -578,7 +580,7 @@ class SltIrSpectrum(_SingleProcessed):
 
     __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_born_charges", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
      
-    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
+    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
         super().__init__(slt_group, slt_save)
         self._hessian = hessian
         self._masses_inv_sqrt = masses_inv_sqrt
@@ -600,16 +602,18 @@ class SltIrSpectrum(_SingleProcessed):
             "Precision": settings.precision.upper(),
             "Description": f"IR intensities{"" if self._convolution is None else " and convoluted spectra"} calculated from Group '{self._group_name}'."
         }
-        self._data_dict = {"INTENSITIES": (self._result[0], "Dataset containing mode frequencies in cm-1 and intensities for xyz polarizations in the form [freq, x, y, z, average].")}
-        if self._convolution is not None:
-            self._data_dict["CONVOLUTION"] = (self._result[1], f"Data set containing convoluted specta using {self._convolution} broadening with fwhm = {self._fwhm} in the form [wave_number, x, y, z, average].")
+        
+        if self._convolution is None:
+            self._data_dict = {"INTENSITIES": (self._result[0], "Dataset containing mode frequencies in cm-1 and intensities for xyz polarizations in the form [freq, x, y, z, average].")}
+        else:
+            self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm-1 Type = {self._convolution}"
+            self._data_dict["CONVOLUTION"] = (self._result[1], f"Data set containing convoluted specta using {self._convolution} broadening with FWHM = {self._fwhm} cm-1 in the form [wave_number, x, y, z, average].")
     
     def _load_from_slt_file(self):
-        self._result = [self._slt_group["INTENSITIES"][:]]
-        try:
-            self._result.append(self._slt_group["CONVOLUTION"][:])
-        except SltFileError:
-            pass
+        if self._slt_group.attributes["Kind"] == "INTENSITIES":
+            self._result = (self._slt_group["INTENSITIES"][:])
+        else:
+            self._result = (self._slt_group["INTENSITIES"][:], self._slt_group["CONVOLUTION"][:])
 
     #TODO: plot
     def _plot(self):
@@ -697,10 +701,10 @@ class SltPropertyUnderMagneticField(_MultiProcessed):
             self._result = empty((len(self._mode), self._magnetic_fields.shape[0] * self._orientations.shape[0], *self._dims), dtype=settings.complex if self._full_matrix else settings.float, order="C")
             self._result_shape = (len(self._mode), self._orientations.shape[0], self._magnetic_fields.shape[0], *self._dims)
     
-    def _gather_results(self, result_queue):
+    def _gather_results(self, result_queue, number_processes):
         property_array = zeros((len(self._mode), self._magnetic_fields.shape[0], *self._dims), dtype=settings.complex if self._full_matrix else settings.float, order="C")
         self._energies = zeros((self._magnetic_fields.shape[0], self._number_of_states), dtype=settings.float, order="C")
-        while not result_queue.empty():
+        for _ in range(number_processes):
             start_field_index, end_field_index, property_array_result, energies_array_result = result_queue.get()
             for i, j in enumerate(range(start_field_index, end_field_index)):
                 property_array[:, j] += property_array_result[:, i]
@@ -802,9 +806,9 @@ class SltZeemanSplitting(_MultiProcessed):
             self._result = empty((self._magnetic_fields.shape[0] * self._orientations.shape[0], self._number_of_states), dtype=self._magnetic_fields.dtype, order="C")
             self._result_shape = (self._orientations.shape[0], self._magnetic_fields.shape[0], self._number_of_states)
     
-    def _gather_results(self, result_queue):
+    def _gather_results(self, result_queue, number_processes):
         zeeman_splitting_array = zeros((self._magnetic_fields.shape[0], self._args[0]), dtype=self._magnetic_fields.dtype)
-        while not result_queue.empty():
+        for _ in range(number_processes):
             start_field_index, end_field_index, zeeman_array = result_queue.get()
             for i, j in enumerate(range(start_field_index, end_field_index)):
                 zeeman_splitting_array[j, :] += zeeman_array[i, :]
@@ -879,9 +883,9 @@ class SltMagnetisation(_MultiProcessed):
             self._result_shape = (self._orientations.shape[0], self._magnetic_fields.shape[0], self._temperatures.shape[0])
             self._transpose_result = (0, 2, 1)
     
-    def _gather_results(self, result_queue):
+    def _gather_results(self, result_queue, number_processes):
         result_magnetisation_array = zeros((self._magnetic_fields.shape[0], self._temperatures.shape[0]), dtype=self._temperatures.dtype)
-        while not result_queue.empty():
+        for _ in range(number_processes):
             start_field_index, end_field_index, magnetisation_array = result_queue.get()
             for i, j in enumerate(range(start_field_index, end_field_index)):
                 result_magnetisation_array[j, :] += magnetisation_array[i, :]
@@ -971,5 +975,113 @@ class SltPhononDispersion(_MultiProcessed):
         plt.grid(True)
         plt.show()
  
+    def _to_data_frame(self):
+        pass
+
+
+class SltPhononDensityOfStates(_MultiProcessed):
+    _method_name = "Phonon Density of States"
+    _method_type = "PHONON_DENSITY_OF_STATES"
+
+    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_kpoints_grid", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
+     
+    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, kpoints_grid: ndarray, start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = None, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
+        super().__init__(slt_group, len(kpoints_grid), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
+        self._hessian = hessian
+        self._masses_inv_sqrt = masses_inv_sqrt
+        self._kpoints_grid = kpoints_grid
+        self._start_wavenumber = start_wavenumber
+        self._stop_wavenumber = stop_wavenumber
+        self._convolution = convolution
+        self._resolution = resolution
+        self._fwhm = fwhm
+        self._args = [self._start_wavenumber, self._stop_wavenumber]
+        self._executor_proxy = _phonon_density_of_states_proxy
+        self._returns = True
+
+    def _load_args_arrays(self):
+        self._args_arrays = [self._hessian, outer(self._masses_inv_sqrt, self._masses_inv_sqrt), self._kpoints_grid]
+
+    def _gather_results(self, result_queue, number_processes):
+        all_frequencies = []
+        for _ in range(number_processes):
+            all_frequencies.extend(result_queue.get())
+
+        all_frequencies = asarray(all_frequencies, order='C', dtype=settings.float)
+        frequencies_min = min(all_frequencies)
+        frequencies_max = max(all_frequencies)
+        frequencies_min -= frequencies_min/self._resolution
+        frequencies_max += frequencies_max/self._resolution
+        hist, bin_edges = histogram(all_frequencies, bins=self._resolution, range=(frequencies_min, frequencies_max), density=False)
+
+        if self._convolution is None:
+            return bin_edges, hist
+        else:
+            frequencies = (bin_edges[:-1] + bin_edges[1:]) / 2
+            au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=self._kpoints_grid.dtype)
+            start_wavenumber = sign(self._start_wavenumber) * sqrt(abs(self._start_wavenumber)) * au_bohr_cm_1
+            stop_wavenumber = sign(self._stop_wavenumber) * sqrt(abs(self._stop_wavenumber)) * au_bohr_cm_1
+            frequency_range = linspace(start_wavenumber, stop_wavenumber, self._resolution, dtype=self._kpoints_grid.dtype)
+            intensities = (hist / max(hist)).astype(self._kpoints_grid.dtype)
+            if self._convolution == "lorentzian":
+                gamma = self._fwhm / 2
+                convolution = _convolve_lorentzian(frequencies, intensities, frequency_range, gamma)
+                return frequency_range, convolution / max(convolution)
+            
+            elif self._convolution == "gaussian":
+                sigma = self._fwhm / (2 * sqrt(2 * log(2)))
+                convolution = _convolve_gaussian(frequencies, intensities, frequency_range, sigma)
+
+                return frequency_range, convolution / max(convolution)
+
+    def _save(self):
+        self._metadata_dict = {
+            "Type": self._method_type,
+            "Kind": "HISTOGRAM" if self._convolution is None else "CONVOLUTION",
+            "Precision": settings.precision.upper(),
+            "Description": f"Group containing {self._method_name} calculated from Group '{self._group_name}'."
+        }
+        if self._convolution is None:
+            self._data_dict = {
+                "BIN_EDGES": (self._result[0], "Dataset containing bin edges in cm-1 for the histogram of phonon DOS."),
+                "HISTOGRAM": (self._result[1], "Dataset containing histogram of the phonon DOS."),
+                "KPTS_GRID": (self._kpoints_grid, "Dataset containing the k-point grid in the fractional coordinates of the reciprocal lattice used for the phonon DOS calculation.")
+            }
+        else:
+            self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm-1 Type = {self._convolution}"
+            self._data_dict = {
+                "FREQUENCIES": (self._result[0], "Dataset containing frequencies in cm-1 for the phonon DOS."),
+                "CONVOLUTION": (self._result[1], f"Dataset containing phonon DOS with {self._convolution} broadening, where FWHM = {self._fwhm} cm-1."),
+                "KPTS_GRID": (self._kpoints_grid, "Dataset containing the k-point grid in the fractional coordinates of the reciprocal lattice used for the phonon DOS calculation.")
+            }
+
+    def _load_from_slt_file(self):
+        if self._slt_group.attributes["Kind"] == "HISTOGRAM":
+            self._result = (self._slt_group["BIN_EDGES"][:], self._slt_group["HISTOGRAM"][:])
+            self._kpoints_grid = self._slt_group["KPTS_GRID"][:]
+            self._convolution = None
+        else:
+            self._result = (self._slt_group["FREQUENCIES"][:], self._slt_group["CONVOLUTION"][:])
+            self._kpoints_grid = self._slt_group["KPTS_GRID"][:]
+            self._convolution = True
+
+    def _plot(self, **kwargs):
+        if self._convolution is None:
+            plt.figure(figsize=(8, 6))
+            plt.bar(self._result[0][:-1], self._result[1], width=diff(self._result[0]), edgecolor='black', alpha=0.7)
+            plt.xlabel('Frequency (cm$^{-1}$)')
+            plt.ylabel('Counts')
+            plt.title('Intermediate Histogram of Phonon Frequencies')
+            plt.grid(True, linestyle='--', alpha=0.5)
+            plt.show()
+        else:
+            plt.figure(figsize=(8, 6))
+            plt.plot(self._result[0], self._result[1], color='blue')
+            plt.xlabel('Frequency (cm$^{-1}$)')
+            plt.ylabel('Density of States (arb. units)')
+            plt.title('Phonon Density of States')
+            plt.grid(True)
+            plt.show()
+
     def _to_data_frame(self):
         pass

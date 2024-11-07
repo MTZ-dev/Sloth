@@ -89,7 +89,7 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
     def _executor():
         pass
     
-    # @slothpy_exc("SltCompError")
+    @slothpy_exc("SltCompError")
     def run(self):
         if not self._ready:
             with threadpool_limits(limits=settings.number_cpu):
@@ -128,7 +128,7 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
     def _plot(self, show=True):
         pass
 
-    # @slothpy_exc("SltPlotError")
+    @slothpy_exc("SltPlotError")
     @ensure_ready
     def plot(self, *args, **kwargs):
         self._plot(*args, **kwargs)
@@ -189,7 +189,7 @@ class _MultiProcessed(_SingleProcessed):
         self._additional_result = False
         self._additional_result_shape = ()
         self._benchmark_process = None
-        self._monitor = None # It is here only until the GUI is ready
+        self._monitor = None # This is here only until the GUI is ready
 
     @contextmanager
     def _ensure_shared_memory_manager(self):
@@ -235,7 +235,7 @@ class _MultiProcessed(_SingleProcessed):
             sm_arrays_info_list.append(self._sm_result_info) ######## From here I removed self._slt_hamiltonian.info in the first entry and self._returns from the last entry!!!!!!!!!
         return [(sm_arrays_info_list, self._args, process_index, chunk.start, chunk.end) for process_index, chunk in enumerate(_distribute_chunks(self._number_to_parallelize, self._number_processes))]
 
-    def _gather_results(self, results):
+    def _gather_results(self, results_queue):
         pass
 
     def _executor(self):

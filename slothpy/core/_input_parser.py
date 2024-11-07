@@ -18,7 +18,7 @@ import inspect
 from functools import wraps
 from os import cpu_count
 from warnings import warn
-from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, log, int64, int32
+from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, linspace, meshgrid, vstack, log, int64, int32
 from slothpy.core._slothpy_exceptions import SltInputError, SltFileError, SltSaveError, SltWarning, slothpy_exc
 from slothpy._general_utilities._grids_over_hemisphere import lebedev_laikov_grid_over_hemisphere, fibonacci_over_hemisphere, meshgrid_over_hemisphere
 from slothpy._general_utilities._math_expresions import _normalize_grid_vectors, _normalize_orientations, _normalize_orientation
@@ -300,17 +300,38 @@ def validate_input(func):
                         if value <= 0:
                             raise ValueError("FWHM must be greater than zero.")
                     case "resolution":
-                        if not isinstance(value, (int, int32, int64)) or value <= 0:
+                        if (not isinstance(value, (int, int32, int64)) or value <= 0) and value is not None:
                             raise ValueError("Resolution of the spectra must be set to an integer greater than zero.")
                     case "start_wavenumber":
                         if value is not None:
                             value = settings.float(value)
+                            au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=settings.float)
+                            value = value / au_bohr_cm_1
+                            value = value * value if value >= 0 else -value * value
                     case "stop_wavenumber":
                         if value is not None:
+                            value = settings.float(value)
+                            au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=settings.float)
+                            value = value / au_bohr_cm_1
+                            value = value * value if value >= 0 else -value * value
                             if bound_args.arguments["start_wavenumber"] is not None and value <= bound_args.arguments["start_wavenumber"]:
                                 raise ValueError("The stop_wavenumber must be strictly greater than the start_wavenumber.")
-                            value = settings.float(value)
-                
+                    case "kpoints_grid":
+                        if isinstance(value, (int, int32, int64)):
+                            if value <= 0:
+                                raise ValueError("The k-points grid must be greater than 0.")
+                            else:
+                                q = linspace(0, 1, value, endpoint=False)
+                                q_grid = meshgrid(q, q, q, indexing='ij')
+                                value = vstack([grid.ravel() for grid in q_grid]).T
+                        else:
+                            try:
+                                value = asarray(value, order='C', dtype=settings.float)
+                            except Exception:
+                                raise ValueError("The k-points grid must be an arraylike object of floats.")
+                            if value.ndim != 2 or value.shape[1] != 3:
+                                raise ValueError("The k-points grid array must be a 2D array in the form [[k_x, k_y, k_z],...] in the fractional coordinate system of the reciprocal lattice.")
+
                 bound_args.arguments[name] = value
                 
         except Exception as exc:

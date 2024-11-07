@@ -118,7 +118,7 @@ def _load_shared_memory_arrays(sm_arrays_info_list):
 
 
 def exit_handler(signum, frame):
-    print("Quitting SlothPy...")
+    # print("Quitting SlothPy...")
     exit(1)
 
 

@@ -37,10 +37,9 @@ from slothpy._general_utilities._constants import AU_BOHR_CM_1
 
 def _phonon_frequencies(hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarray, start_mode: int, stop_mode: int):
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=hessian.dtype)
-    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], kpoint=kpoint, start_mode=start_mode, stop_mode=stop_mode, single_process=True)
+    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], kpoint=kpoint, start_mode=start_mode, stop_mode=stop_mode, single_process=True, eigen_range="I")
 
-    frequencies_squared = hessian_object.frequencies_squared
-    frequencies = where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared))) * au_bohr_cm_1
+    frequencies = hessian_object.frequencies * au_bohr_cm_1
 
     mode_numbers = arange(start_mode, stop_mode, 1, dtype=int64)
 

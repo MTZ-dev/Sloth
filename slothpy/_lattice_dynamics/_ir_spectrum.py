@@ -16,23 +16,20 @@
 
 from typing import Optional, Literal
 
-from numpy import ndarray, asarray, zeros, where, outer, sum, hstack, linspace, max, abs, sqrt, complex64, log
+from numpy import ndarray, asarray, zeros, outer, sum, hstack, linspace, sign, max, abs, sqrt, complex64, log
 
 from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import AU_BOHR_CM_1
 from slothpy._general_utilities._lapack import _cgemmt, _zgemmt
-from slothpy._general_utilities._math_expresions import _convolve_gaussian, _convolve_lorentzian
+from slothpy._general_utilities._math_expresions import _convolve_gaussian_xyz, _convolve_lorentzian_xyz
 
 def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None):
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=hessian.dtype)
-    start_wavenumber_au = start_wavenumber / au_bohr_cm_1
-    stop_wavenumber_au = stop_wavenumber / au_bohr_cm_1
-    start_wavenumber_au = start_wavenumber_au * start_wavenumber_au if start_wavenumber_au >= 0 else -start_wavenumber_au * start_wavenumber_au
-    stop_wavenumber_au = stop_wavenumber_au * stop_wavenumber_au if stop_wavenumber_au >= 0 else -stop_wavenumber_au * stop_wavenumber_au
-    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], kpoint=asarray([0., 0., 0.], dtype=hessian.dtype), start_frequency=start_wavenumber_au, stop_frequency=stop_wavenumber_au, single_process=True)
 
-    frequencies_squared, eigenvectors = hessian_object.frequencies_squared_eigenvectors
-    frequencies = where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared))) * au_bohr_cm_1
+    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], kpoint=asarray([0., 0., 0.], dtype=hessian.dtype), start_frequency=start_wavenumber, stop_frequency=stop_wavenumber, single_process=True, eigen_range="V")
+
+    frequencies, eigenvectors = hessian_object.frequencies_eigenvectors
+    frequencies = frequencies * au_bohr_cm_1
 
     born_charges_weighted = born_charges * masses_inv_sqrt[:, None]
     Z_modes = _cgemmt(eigenvectors, born_charges_weighted) if eigenvectors.dtype == complex64 else _zgemmt(eigenvectors, born_charges_weighted)
@@ -46,14 +43,16 @@ def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarr
 
     if convolution is not None:
         frequency_range_convolution = zeros((5, resolution), dtype=hessian.dtype)
+        start_wavenumber = sign(start_wavenumber) * sqrt(abs(start_wavenumber)) * au_bohr_cm_1
+        stop_wavenumber = sign(stop_wavenumber) * sqrt(abs(stop_wavenumber)) * au_bohr_cm_1
         frequency_range_convolution[0, :] = linspace(start_wavenumber, stop_wavenumber, resolution, dtype=hessian.dtype)
 
         if convolution == "lorentzian":
             gamma = fwhm / 2
-            _convolve_lorentzian(frequencies_intensities, frequency_range_convolution, gamma)
+            _convolve_lorentzian_xyz(frequencies_intensities, frequency_range_convolution, gamma)
         elif convolution == "gaussian":
             sigma = fwhm / (2 * sqrt(2 * log(2)))
-            _convolve_gaussian(frequencies_intensities, frequency_range_convolution, sigma)
+            _convolve_gaussian_xyz(frequencies_intensities, frequency_range_convolution, sigma)
 
         frequency_range_convolution[1:4,:] = frequency_range_convolution[1:4,:] / max(frequency_range_convolution[1:4,:])
         frequency_range_convolution[4,:] = frequency_range_convolution[4,:] / max(frequency_range_convolution[4,:])
