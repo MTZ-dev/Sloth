@@ -19,23 +19,24 @@ from __future__ import annotations
 from typing import Union, Optional, Iterator, List, Mapping, Sequence
 import warnings
 from ast import literal_eval
-from os import makedirs
-from os.path import join
+from os import makedirs, remove
+from os.path import join, exists
 
 from h5py import File, Group, Dataset, string_dtype
-from numpy import ndarray, asarray, asfortranarray, empty, float32, float64, tensordot, abs, diag, conjugate, sqrt, repeat
+from numpy import ndarray, asarray, asfortranarray, empty, real, linspace, outer, repeat, tensordot, diag, meshgrid, stack, arange, tensordot, float32, float64,  abs,  conjugate, sqrt, exp, pi
 from numpy.exceptions import ComplexWarning
 from numpy.linalg import norm
 warnings.filterwarnings("ignore", category=ComplexWarning)
 from scipy.linalg import eigvalsh
 from ase import Atoms
-from ase.io import write
+from ase.io import write, read
 from ase.cell import Cell
+from ase.io.trajectory import Trajectory
 
 from slothpy.core._registry import MethodTypeMeta, MethodDelegateMeta
 from slothpy.core._config import settings
-from slothpy.core._slothpy_exceptions import slothpy_exc, KeyError, SltFileError, SltReadError, SltInputError
-from slothpy.core._input_parser import validate_input
+from slothpy.core._slothpy_exceptions import slothpy_exc, KeyError, SltFileError, SltReadError
+from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import RED, GREEN, BLUE, PURPLE, YELLOW, RESET
 from slothpy._general_utilities._math_expresions import _magnetic_dipole_momenta_from_spins_angular_momenta, _total_angular_momenta_from_spins_angular_momenta
 from slothpy._general_utilities._io import _get_dataset_slt_dtype, _group_exists, _dataset_exists, _xyz_to_slt, _supercell_to_slt, _hessian_to_slt, _read_hessian_born_charges_from_dir
@@ -715,6 +716,8 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
     def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum: pass
     
+    def animate_normal_modes(self, modes_list: list[int], output_directory: str, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], frames: int = 60, amplitude: float = 0.8, output_prefix: str = "", output_format: Literal["xyz", "pdb"] = "pdb") -> None: pass
+
     def states_energies_cm_1(self, start_state=0, stop_state=0, slt_save=None) -> SltStatesEnergiesCm1: pass
     
     def states_energies_au(self, start_state=0, stop_state=0, slt_save=None) -> SltStatesEnergiesAu: pass
@@ -1267,8 +1270,55 @@ class SltHessian(SltSuperCell):
     def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum:
         return SltIrSpectrum(self._slt_group, self.hessian()[:], self._masses_inv_sqrt(), asfortranarray(self.born_charges()[:], dtype=settings.complex), start_wavenumber, stop_wavenumber, convolution, resolution, fwhm, slt_save)
 
-    def animate_normal_modes(self):
-        pass
+    def animate_normal_modes(self, modes_list: list[int], output_directory: str, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], frames: int = 60, amplitude: float = 0.8, output_prefix: str = "", output_format: Literal["xyz", "pdb"] = "pdb") -> None:
+        
+        if not exists(output_directory):
+            makedirs(output_directory)
+
+        start_mode = min(modes_list)
+        stop_mode = max(modes_list) + 1
+        masses_sqrt_inv = self._masses_inv_sqrt()
+
+        hessian_object = Hessian([self.hessian()[:], outer(masses_sqrt_inv, masses_sqrt_inv)], kpoint, start_mode=start_mode, stop_mode=stop_mode, eigen_range="I", single_process=True)
+        _, eigenvectors = hessian_object.frequencies_eigenvectors
+
+        atoms = self.atoms_object()
+        positions = atoms.get_positions()
+        nxnynz = self._nxnynz
+        N_atoms_unit_cell = len(atoms) // (nxnynz[0] * nxnynz[1] * nxnynz[2])
+        positions = positions.reshape((nxnynz[0], nxnynz[1], nxnynz[2], N_atoms_unit_cell, 3))
+
+        R_vectors = stack(meshgrid(arange(nxnynz[0]), arange(nxnynz[1]), arange(nxnynz[2]), indexing='ij'), axis=-1)
+
+        times = linspace(0, 1, frames, endpoint=False)
+        phase = exp(2j * pi * tensordot(R_vectors, kpoint, axes=([3], [0])))
+
+        topology_filename = join(output_directory, f"{output_prefix}topology.{output_format}")
+        write(topology_filename, atoms)
+        print(f"Initial topology saved to '{topology_filename}'")
+
+        for mode_index in modes_list:
+            mode_internal_index = mode_index - start_mode
+            eigenvector = eigenvectors[:, mode_internal_index]
+            eigenvector = (eigenvector * masses_sqrt_inv).reshape((N_atoms_unit_cell, 3))
+            
+            trajectory = Trajectory('.tmp_slt_animation.traj', 'w')
+
+            for t in times:
+                total_phase = phase * exp(-2j * pi * t)
+                displacements = amplitude * real(eigenvector[None, None, None, :, :] * total_phase[:, :, :, None, None])
+                new_positions = positions + displacements
+
+                atoms_frame = atoms.copy()
+                atoms_frame.set_positions(new_positions.reshape((-1, 3)))
+                trajectory.write(atoms_frame)
+
+            trajectory.close()
+            trajectory_filename = join(output_directory, f"{output_prefix}mode_{mode_index}.{output_format}")
+            trajectory = read('.tmp_slt_animation.traj@0:%d' % frames)
+            write(trajectory_filename, trajectory)
+            remove('.tmp_slt_animation.traj')
+            print(f"Animation frames for mode {mode_index} saved to '{trajectory_filename}'")
 
 
 ####################

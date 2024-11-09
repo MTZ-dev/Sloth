@@ -18,7 +18,7 @@ import inspect
 from functools import wraps
 from os import cpu_count
 from warnings import warn
-from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, linspace, meshgrid, vstack, log, int64, int32
+from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, linspace, meshgrid, vstack, log, int64, int32, max, min
 from slothpy.core._slothpy_exceptions import SltInputError, SltFileError, SltSaveError, SltWarning, slothpy_exc
 from slothpy._general_utilities._grids_over_hemisphere import lebedev_laikov_grid_over_hemisphere, fibonacci_over_hemisphere, meshgrid_over_hemisphere
 from slothpy._general_utilities._math_expresions import _normalize_grid_vectors, _normalize_orientations, _normalize_orientation
@@ -247,6 +247,9 @@ def validate_input(func):
                             raise ValueError("The custom_directory must be specified as a string when output_option is 'xyz'.")
                         if value == 'slt' and (bound_args.arguments["slt_group_name"] is None or not isinstance(bound_args.arguments["slt_group_name"], str)):
                             raise SltInputError(ValueError("The slt_group_name must be specified when output_option is 'slt'.")) from None
+                    case "output_format":
+                        if value not in ["xyz", "pdb"]:
+                            raise ValueError("The output format must be 'xyz' or 'pdb'.")
                     case "nx":
                         from slothpy._general_utilities._utils import _check_n
                         _check_n(value, bound_args.arguments["ny"], bound_args.arguments["nz"], True)
@@ -278,7 +281,7 @@ def validate_input(func):
                             raise ValueError(f"Set the starrt mode number to a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
                     case "stop_mode":
                         if value == 0:
-                            value = int(slt_group.attributes["Modes"])
+                            value = int64(slt_group.attributes["Modes"])
                         elif not isinstance(value, (int, int32, int64)) or value < 0:
                             raise ValueError(f"The stop mode number must be a nonnegative integer less than or equal to the overall number of available modes: {slt_group.attributes['Modes']} (or 0 for all the states).")
                         if value > slt_group.attributes["Modes"]:
@@ -331,6 +334,21 @@ def validate_input(func):
                                 raise ValueError("The k-points grid must be an arraylike object of floats.")
                             if value.ndim != 2 or value.shape[1] != 3:
                                 raise ValueError("The k-points grid array must be a 2D array in the form [[k_x, k_y, k_z],...] in the fractional coordinate system of the reciprocal lattice.")
+                    case "modes_list":
+                        try:
+                            value = asarray(value, order='C', dtype=int64)
+                            max_mode = int64(slt_group.attributes["Modes"])
+                            if max(value) >= max_mode or min(value) < 0:
+                                raise Exception
+                        except Exception:
+                                raise ValueError(f"The modes list must be an arraylike object of nonnegative integers less than the number of available modes {max_mode}.")
+                    case "frames":
+                        if not isinstance(value, (int, int32, int64)) or value <= 0:
+                            raise ValueError("Frames must be set to an integer greater than zero.")
+                    case "amplitude":
+                        value = settings.float(value)
+                        if value <= 0:
+                            raise ValueError("Amplitude must be greater than zero.")
 
                 bound_args.arguments[name] = value
                 

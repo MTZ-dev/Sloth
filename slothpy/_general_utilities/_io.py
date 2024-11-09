@@ -113,7 +113,7 @@ def _supercell_to_slt(slt_filepath, group_name, elements, positions, cell, nx, n
         group.attrs["Supercell_Repetitions"] = [nx, ny, nz]
 
 
-def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, electric_dipole_momenta: bool, ssc: bool, pt2: bool) -> None:
+def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool) -> None:
     
     # Retrieve dimensions and block sizes for spin-orbit calculations
     (so_dim, num_of_whole_blocks, remaining_columns) = _get_orca_blocks_size(orca_filepath)
