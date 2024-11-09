@@ -28,8 +28,9 @@ import uuid
 from multiprocessing import Pool
 
 import docker.errors
+from tqdm import tqdm
 
-def generate_input_file(dof_number, disp_number, wfn_start = None):
+def generate_input_file(dof_number, disp_number, wfn_start=None):
     project_name = f'dof_{dof_number}_disp_{disp_number}'
     input_filename = f'{project_name}.inp'
     xyz_filename = f'dof_{dof_number}_disp_{disp_number}.xyz'
@@ -40,18 +41,18 @@ def generate_input_file(dof_number, disp_number, wfn_start = None):
         restart_wfn_line = '    WFN_RESTART_FILE_NAME dof_0_disp_0-RESTART.wfn'
 
     input_template = """&GLOBAL
-  PROJECT {project_name}
-  RUN_TYPE ENERGY_FORCE
-  PRINT_LEVEL MEDIUM
-  WALLTIME 255000
-  # PREFERRED_DIAG_LIBRARY ScaLAPACK
+    PROJECT {project_name}
+    RUN_TYPE ENERGY_FORCE
+    PRINT_LEVEL MEDIUM
+    WALLTIME 255000
+    # PREFERRED_DIAG_LIBRARY ScaLAPACK
 &END GLOBAL
 
 &FORCE_EVAL
-  METHOD QS
-  STRESS_TENSOR  ANALYTICAL
+    METHOD QS
+    STRESS_TENSOR  ANALYTICAL
 
-   &DFT
+    &DFT
     BASIS_SET_FILE_NAME   BASIS_MOLOPT_UZH
     POTENTIAL_FILE_NAME   POTENTIAL_UZH
 {restart_wfn_line}
@@ -60,69 +61,69 @@ def generate_input_file(dof_number, disp_number, wfn_start = None):
     UKS  F
 
     &MGRID
-      CUTOFF 1800
-      NGRIDS 5
-      REL_CUTOFF 90
+        CUTOFF 1800
+        NGRIDS 5
+        REL_CUTOFF 90
     &END MGRID
 
     &POISSON
-      PERIODIC XYZ
+        PERIODIC XYZ
     &END POISSON
 
     &QS
-      EPS_DEFAULT 1.0E-10
-      METHOD GAPW
-      EXTRAPOLATION_ORDER  4
-      # MIN_PAIR_LIST_RADIUS -1 # Set this for hybrids: see https://www.cp2k.org/faq:hfx_eps_warning
-      # EPS_PGF_ORB 1.0E-14
+        EPS_DEFAULT 1.0E-10
+        METHOD GAPW
+        EXTRAPOLATION_ORDER  4
+        # MIN_PAIR_LIST_RADIUS -1 # Set this for hybrids: see https://www.cp2k.org/faq:hfx_eps_warning
+        # EPS_PGF_ORB 1.0E-14
     &END QS
 
     &SCF
-     @INCLUDE scf.inc
+        @INCLUDE scf.inc
     &END SCF
 
     &XC
-     @INCLUDE XC.inc
+        @INCLUDE XC.inc
     &END XC
 
     &PRINT
-      &MOMENTS
-       FILENAME
-      &END
-     &END
+        &MOMENTS
+        FILENAME
+        &END
+        &END
 
-  &END DFT
+    &END DFT
 
-  &SUBSYS
-   @INCLUDE subsys.inc
+    &SUBSYS
+    @INCLUDE subsys.inc
 
     &TOPOLOGY
-       COORD_FILE_NAME {xyz_filename}
-       COORD_FILE_FORMAT  XYZ
-       NUMBER_OF_ATOMS  -1
-       MULTIPLE_UNIT_CELL  1 1 1
-     &END TOPOLOGY
+        COORD_FILE_NAME {xyz_filename}
+        COORD_FILE_FORMAT  XYZ
+        NUMBER_OF_ATOMS  -1
+        MULTIPLE_UNIT_CELL  1 1 1
+        &END TOPOLOGY
 
-  &END SUBSYS
+    &END SUBSYS
 
-  &PRINT
+    &PRINT
     &FORCES
-     FILENAME
-     NDIGITS 12
+        FILENAME
+        NDIGITS 12
     &END
-   &END
+    &END
 
 &END FORCE_EVAL
-"""
+    """
 
     with open(input_filename, 'w') as f:
         f.write(input_template.format(project_name=project_name, xyz_filename=xyz_filename, restart_wfn_line=restart_wfn_line))
 
     return input_filename
 
-def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_number, disp_number, main_process = False):
+def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_number, disp_number, main_process=False):
 
-    image = f'cp2k/cp2k:{cp2k_version}' ###!!!### Replace that with your format if it's different than cp2k/cp2k:{cp2k_version} ###!!!###
+    image = f'cp2k/cp2k:{cp2k_version}'  ###!!!### Replace that with your format if it's different than cp2k/cp2k:{cp2k_version} ###!!!###
 
     client = docker.from_env()
     container = None
@@ -155,7 +156,7 @@ def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_
         existing_container.remove(force=True)
     except docker.errors.NotFound:
         pass  # No existing container, proceed
-    
+
     print(f"Starting container for {input_file}...")
 
     container = client.containers.create(
@@ -167,7 +168,7 @@ def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_
         detach=True,
         shm_size='4g',
         name=container_name,
-    )   
+    )
 
     def handle_sigterm(signum, frame):
         print(f"KeyboardInterrupt or termination signal caught in run_cp2k for {input_file} closing docker container and client...")
@@ -195,10 +196,17 @@ def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_
         print(f"Container exited with code {exit_code} for {input_file}")
         raise Exception(f"Container error with exit code {exit_code}")
 
-
 def process_dof_disp(dof_disp):
     dof_number, disp_number = dof_disp
     project_name = f'dof_{dof_number}_disp_{disp_number}'
+
+    # Safety check: if calculation is already done, skip
+    moments_file = f'{project_name}-moments-1_0.dat'
+    xyz_file_out = f'{project_name}-1_0.xyz'
+    if os.path.exists(moments_file) and os.path.exists(xyz_file_out):
+        print(f"Skipping {project_name}, calculation already completed.")
+        return
+
     input_file = generate_input_file(dof_number, disp_number)
     output_file = f'{project_name}.out'
     threads_per_process = args.threads
@@ -217,7 +225,7 @@ def process_dof_disp(dof_disp):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CP2K calculations in Docker containers.')
     parser.add_argument('--cpus', type=int, default=16, help='Total number of CPUs to use.')
-    parser.add_argument('--processes', type=int, default=1, help='Number of concurrent processes (containers) where (cups//processes)//threads mpi processes will be used per container.')
+    parser.add_argument('--processes', type=int, default=1, help='Number of concurrent processes (containers) where (cpus//processes)//threads mpi processes will be used per container.')
     parser.add_argument('--threads', type=int, default=2, help='Number of OMP threads per each mpi process within container.')
     parser.add_argument('--version', type=str, required=True, help='CP2K Docker image version to use.')
     parser.add_argument('--wfn_start', type=str, default=None, help='Optional CP2K -RESTART.wfn file with starting guess for the relaxed geometry.')
@@ -235,16 +243,28 @@ if __name__ == '__main__':
         if match:
             dof_number = int(match.group(1))
             disp_number = int(match.group(2))
-            dof_disp_list.append((dof_number, disp_number))
+            if (dof_number == 0 and disp_number == 0):
+                continue  # We handle dof_0_disp_0 separately
+            else:
+                # Check if calculation is already done
+                moments_file = f'dof_{dof_number}_disp_{disp_number}-moments-1_0.dat'
+                xyz_file_out = f'dof_{dof_number}_disp_{disp_number}-1_0.xyz'
+                if os.path.exists(moments_file) or os.path.exists(xyz_file_out):
+                    print(f"Skipping dof_{dof_number}_disp_{disp_number}, calculation already completed.")
+                    continue
+                else:
+                    dof_disp_list.append((dof_number, disp_number))
 
-    if (0, 0) not in dof_disp_list:
-        raise ValueError('dof_0_disp_0.xyz file is missing. It is required to proceed.')
+# Check if dof_0_disp_0.xyz exists
+if not os.path.exists('dof_0_disp_0.xyz'):
+    raise ValueError('dof_0_disp_0.xyz file is missing. It is required to proceed.')
 
-    # Remove (0, 0) from list and process it first
-    dof_disp_list.remove((0, 0))
-
-    # Process dof_0_disp_0 first
-    print(f"Job started {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}")
+# Check if dof_0_disp_0 calculation is already completed
+restart_file = 'dof_0_disp_0-RESTART.wfn'
+if os.path.exists(restart_file):
+    print('Calculation for dof_0_disp_0 is already completed, skipping.')
+else:
+    print(f"Job started {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print('Processing dof_0_disp_0...')
     input_file = generate_input_file(0, 0, args.wfn_start)
     output_file = 'dof_0_disp_0.out'
@@ -253,20 +273,23 @@ if __name__ == '__main__':
     cp2k_version = args.version
     run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, 0, 0, True)
     print('Completed calculation for dof 0 disp 0')
+    # After completion, check if the restart file was generated
+    if not os.path.exists(restart_file):
+        raise ValueError('Calculation for dof_0_disp_0 failed to generate the restart file. Cannot proceed.')
 
-    # Process remaining dof and disp in parallel
-    if dof_disp_list:
-        print('Processing remaining calculations in parallel...')
-        try:
-            # Prepare arguments for multiprocessing
-            pool_args = [dof_disp_list[i] for i in range(len(dof_disp_list))]
+# Process remaining dof and disp in parallel
+if dof_disp_list:
+    print('Processing remaining calculations in parallel...')
+    try:
+        pool_args = [dof_disp_list[i] for i in range(len(dof_disp_list))]
 
-            with Pool(processes=args.processes) as pool:
-                pool.map(process_dof_disp, pool_args)
-        except KeyboardInterrupt:
-            print("\nTerminating pool...")
-            pool.terminate()
-            pool.join()
-            sys.exit(1)
-    else:
-        print('No other dof_disp combinations to process.')
+        with Pool(processes=args.processes) as pool:
+            for _ in tqdm(pool.imap_unordered(process_dof_disp, pool_args), total=len(pool_args)):
+                pass
+    except KeyboardInterrupt:
+        print("\nTerminating pool...")
+        pool.terminate()
+        pool.join()
+        sys.exit(1)
+else:
+    print('No other dof_disp combinations to process.')
