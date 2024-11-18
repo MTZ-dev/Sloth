@@ -38,8 +38,7 @@ def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarr
 
     frequencies_intensities = hstack((frequencies.reshape(-1, 1), IR_intensities_xyz, IR_intensities_av.reshape(-1, 1))).T
     frequencies_intensities[1:4,:] = frequencies_intensities[1:4,:] / max(frequencies_intensities[1:4,:])
-    frequencies_intensities[4,:] = frequencies_intensities[4,:] / max(frequencies_intensities[4,:]) 
-    frequency_range_convolution = None
+    frequencies_intensities[4,:] = frequencies_intensities[4,:] / max(frequencies_intensities[4,:])
 
     if convolution is not None:
         frequency_range_convolution = zeros((5, resolution), dtype=hessian.dtype)
@@ -57,4 +56,6 @@ def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarr
         frequency_range_convolution[1:4,:] = frequency_range_convolution[1:4,:] / max(frequency_range_convolution[1:4,:])
         frequency_range_convolution[4,:] = frequency_range_convolution[4,:] / max(frequency_range_convolution[4,:])
 
-    return frequencies_intensities, frequency_range_convolution
+        return frequencies_intensities, frequency_range_convolution
+    
+    return (frequencies_intensities,)

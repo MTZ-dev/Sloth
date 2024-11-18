@@ -15,7 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from math import factorial
-from numpy import ndarray, array, zeros, zeros_like, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, mod, sqrt, min, max, power, int64 as np_int64, min as np_min, exp, pi
+from numpy import ndarray, array, zeros, zeros_like, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, round, mod, sqrt, min, max, power, int64 as np_int64, min as np_min, exp, pi
 from numpy.linalg import eigh, inv
 from numba import jit, prange, types, int64, float32, float64, complex64, complex128
 from slothpy._general_utilities._constants import GE, MU_B_AU
@@ -124,6 +124,10 @@ def _subtract_const_diagonal(matrix, const):
 
     for k in prange(matrix.shape[0]):
         matrix[k, k] -= const
+
+
+def is_approximately_integer(v, tol=0.001):
+    return abs(v - round(v)) < tol
 
 
 @jit("float64(float64, float64)", nopython=True, cache=True, nogil=True)

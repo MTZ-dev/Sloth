@@ -157,8 +157,6 @@ def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_
     except docker.errors.NotFound:
         pass  # No existing container, proceed
 
-    print(f"Starting container for {input_file}...")
-
     container = client.containers.create(
         image=image,
         command=command,
@@ -176,7 +174,7 @@ def run_cp2k(input_file, output_file, mpi_processes, threads, cp2k_version, dof_
             container.remove(force=True)
             client.close()
         except Exception as e:
-            print(f"Error stopping container or client: {e}. Stop it and all the others manually e.g. using task manager.")
+            print(f"Error stopping container or client: {e}. Ensure all processes were terminated or stop them manually e.g. using the task manager.")
         print(f"Terminating process and container for dof {dof_number} disp {disp_number}...")
         sys.exit(1)
 
@@ -220,7 +218,6 @@ def process_dof_disp(dof_disp):
         for f in files_to_remove:
             if os.path.isfile(f):
                 os.remove(f)
-    print(f'Completed calculation for {project_name}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CP2K calculations in Docker containers.')
@@ -249,7 +246,7 @@ if __name__ == '__main__':
                 # Check if calculation is already done
                 moments_file = f'dof_{dof_number}_disp_{disp_number}-moments-1_0.dat'
                 xyz_file_out = f'dof_{dof_number}_disp_{disp_number}-1_0.xyz'
-                if os.path.exists(moments_file) or os.path.exists(xyz_file_out):
+                if os.path.exists(moments_file) and os.path.exists(xyz_file_out):
                     print(f"Skipping dof_{dof_number}_disp_{disp_number}, calculation already completed.")
                     continue
                 else:

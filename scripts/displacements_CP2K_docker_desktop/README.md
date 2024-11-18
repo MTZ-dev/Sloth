@@ -45,7 +45,7 @@ This script automates CP2K calculations using Docker containers of displacement 
   pip install docker
   ```
 
-- **Python Modules:** The script uses Python modules such as `argparse`, `glob`, `re`, `signal`, `multiprocessing`, and `docker`. Ensure these modules are available in your Python environment.
+- **Python Modules:** The script uses Python modules such as `tqdm` and `docker`. Ensure these modules are available in your Python environment.
 
 **Important Instructions:**
 

@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
+from typing import Tuple
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, ExitStack
 from multiprocessing.synchronize import Event
@@ -63,8 +64,8 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
         self._ready = False
         self._slt_save = slt_save
         self._df = None
-        self._data_dict = None
-        self._metadata_dict = None
+        self._data_dict = {}
+        self._metadata_dict = {}
         self._is_from_file = False
 
     def __repr__(self) -> str:
@@ -134,7 +135,7 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
         self._plot(*args, **kwargs)
     
     @ensure_ready
-    def to_numpy_array(self) -> ndarray:
+    def to_numpy_arrays(self) -> Tuple[ndarray]:
         return self._result
     
     @abstractmethod

@@ -478,12 +478,11 @@ class SltFile():
         Returns
         -------
         SltZeemanSplitting
-            The resulting numpy array (after invoking run, eval or
-            to_numpy_array methods) gives Zeeman splitting of number_of_states
-            energy levels in cm-1 for each orientation in the form
-            [orientations, fields, energies] - the first dimension
-            runs over different orientations, the second over field values, and
-            the last gives energies of number_of_states states, unless the
+            The resulting numpy array (after invoking eval or to_numpy_arrays methods)
+            gives Zeeman splitting of number_of_states energy levels in cm⁻¹ for each
+            orientation in the form [orientations, fields, energies] - the first
+            dimension runs over different orientations, the second over field values,
+            and the last gives energies of number_of_states states, unless the
             orientations argument is of 'mesh' type, then the retuened array is
             in the form [mesh, mesh, fields, temperatures] - the first two
             dimensions are in the form of meshgrids over theta and phi angles,
@@ -2058,7 +2057,7 @@ class SltFile():
         Returns
         -------
         ndarray[float64]
-            The resulting eth_array gives energy in cm-1 and is in the form
+            The resulting eth_array gives energy in cm⁻¹ and is in the form
             [temperatures, fields] - the first dimension runs over temperature
             values, and the second over fields.
 
@@ -2323,7 +2322,7 @@ class SltFile():
         Returns
         -------
         ndarray[float64]
-            For the meshgrid the resulting energy_3d_array gives energy in cm-1
+            For the meshgrid the resulting energy_3d_array gives energy in cm⁻¹
             and is in the form [coordinates, fields, temperatures, mesh, mesh]
             - the first dimension runs over coordinates (0-x, 1-y, 2-z), the
             second over field values, and the third over temperatures. The last
@@ -2704,7 +2703,7 @@ class SltFile():
     ) -> ndarray[float64]:
         """
         Returns energies for the given number of first spin-orbit
-        states in cm-1.
+        states in cm⁻¹.
 
         Parameters
         ----------
@@ -2722,7 +2721,7 @@ class SltFile():
         -------
         ndarray[float64]
             The resulting array is one-dimensional and contains the energy of
-            first number_of_states states in cm-1.
+            first number_of_states states in cm⁻¹.
 
         Raises
         ------

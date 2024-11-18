@@ -23,9 +23,9 @@ from os import makedirs, remove
 from os.path import join, exists
 
 from h5py import File, Group, Dataset, string_dtype
-from numpy import ndarray, asarray, asfortranarray, empty, real, linspace, outer, repeat, tensordot, diag, meshgrid, stack, arange, tensordot, float32, float64,  abs,  conjugate, sqrt, exp, pi
+from numpy import ndarray, asarray, asfortranarray, empty, real, linspace, outer, repeat, tensordot, diag, meshgrid, stack, arange, tensordot, einsum, all, where, float32, float64,  abs,  conjugate, sqrt, exp, pi, newaxis
 from numpy.exceptions import ComplexWarning
-from numpy.linalg import norm
+from numpy.linalg import norm, inv
 warnings.filterwarnings("ignore", category=ComplexWarning)
 from scipy.linalg import eigvalsh
 from ase import Atoms
@@ -38,7 +38,7 @@ from slothpy.core._config import settings
 from slothpy.core._slothpy_exceptions import slothpy_exc, KeyError, SltFileError, SltReadError
 from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import RED, GREEN, BLUE, PURPLE, YELLOW, RESET
-from slothpy._general_utilities._math_expresions import _magnetic_dipole_momenta_from_spins_angular_momenta, _total_angular_momenta_from_spins_angular_momenta
+from slothpy._general_utilities._math_expresions import _magnetic_dipole_momenta_from_spins_angular_momenta, _total_angular_momenta_from_spins_angular_momenta, is_approximately_integer
 from slothpy._general_utilities._io import _get_dataset_slt_dtype, _group_exists, _dataset_exists, _xyz_to_slt, _supercell_to_slt, _hessian_to_slt, _read_hessian_born_charges_from_dir
 from slothpy._general_utilities._constants import U_PI_A_AU, E_PI_A_AU
 from slothpy._general_utilities._direct_product_space import _kron_mult
@@ -493,7 +493,7 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
     def plot(self, *args, **kwargs): pass
     
-    def to_numpy_array(self, *args, **kwargs): pass
+    def to_numpy_arrays(self, *args, **kwargs): pass
 
     def to_data_frame(self, *args, **kwargs): pass
 
@@ -536,25 +536,69 @@ class SltGroup(metaclass=MethodDelegateMeta):
             Magnitude of each displacement step in Angstroms.
         output_option : str, optional
             Specifies the output mode. Options:
-            - 'xyz': Write displaced structures as .xyz files.
-            - 'iterator': Return an iterator yielding tuple of dislaced ASE
-            Atoms objects, dofs numbers and displacements numbers
+            - 'xyz': Write displaced structures as `.xyz files`.
+            - 'iterator': Return an iterator yielding tuples of displaced ASE `Atoms`
+            objects, degree of freedom (DOF) numbers, and displacement numbers.
             - 'slt': Dump all displaced structures into the .slt file.
             Default is 'xyz'.
         custom_directory : str, optional
-            Directory path to save .xyz files. Required if output_option is 'xyz'.
+            Directory path to save `.xyz files`. Required if `output_option` is 'xyz'.
         slt_group_name : str, optional
-            Name of the SltGroup to store displaced structures. Required if
-            output_option is 'slt'.
+            Name of the `SltGroup` to store displaced structures. Required if
+            `output_option` is 'slt'.
 
         Returns:
         -------
         Iterator[Atoms] or None
-            Returns an iterator of ASE Atoms objects if output_option is 'iterator'.
+            Returns an iterator of ASE `Atoms` objects if `output_option `is 'iterator'.
             Otherwise, returns None.
         """
         pass
+    
+    def generate_finite_stencil_displacements_reduced_to_unit_cell(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
+        """
+        Generates finite stencil displacements reduced to the unit cell for derivative
+        calculations.
 
+        This method identifies unique atoms in a cluster that correspond to atoms in
+        the given unit cell, based on periodic boundary conditions and the closeness
+        to the central atom. It then displaces only these unique atoms along the
+        x, y, and z axes in both negative and positive directions by a specified number
+        of steps and step size.
+
+        Parameters:
+        ----------
+        unit_cell_group_name : str
+            Name of the `SltGroup` representing the unit cell to which the cluster
+            corresponds.
+        central_atom : ndarray[Union[float32, float64]]
+            Coordinates of the central atom or point in the cluster used as a reference
+            point for uniquely matching the closest atoms.
+        displacement_number : int
+            Number of displacement steps in each direction (negative and positive).
+        step : float
+            Magnitude of each displacement step in Angstroms.
+        output_option : str, optional
+            Specifies the output mode. Options:
+            - 'xyz': Write displaced structures as `.xyz` files.
+            - 'iterator': Return an iterator yielding tuples of displaced ASE `Atoms`
+            objects, degree of freedom (DOF) numbers, and displacement numbers.
+            - 'slt': Dump all displaced structures into the `.slt` file.
+            Default is 'xyz'.
+        custom_directory : str, optional
+            Directory path to save `.xyz` files. Required if `output_option` is 'xyz'.
+        slt_group_name : str, optional
+            Name of the `SltGroup` to store displaced structures. Required if
+            `output_option` is 'slt'.
+
+        Returns:
+        -------
+        Iterator[Atoms] or None
+            Returns an iterator of ASE `Atoms` objects if `output_option` is 'iterator'.
+            Otherwise, returns `None`.
+        """
+        pass
+    
     def supercell(self, nx: int, ny: int, nz: int, output_option: Literal["xyz", "slt"] = "xyz", xyz_filepath: Optional[str] = None, slt_group_name: Optional[str] = None) -> SltGroup:
         """
         Generates a supercell by repeating the unit cell along x, y, and z axes.
@@ -707,16 +751,320 @@ class SltGroup(metaclass=MethodDelegateMeta):
         ... )
         """
         pass
+            
+    def phonon_frequencies(self, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], start_mode: Optional[int] = 0, stop_mode: Optional[int] = 0, slt_save: str = None) -> SltPhononFrequencies:
+        """
+        Calculates the phonon frequencies at a specified k-point.
 
-    def phonon_frequencies(self, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], start_mode: Optional[int] = 0, stop_mode: Optional[int] = 0, slt_save: str = None) -> SltPhononFrequencies: pass
+        Computes the phonon frequencies (vibrational modes) at a given k-point
+        in the Brillouin zone using the dynamical matrix derived from the
+        Hessian.
 
-    def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion: pass
+        Parameters
+        ----------
+        kpoint : ndarray[Union[float32, float64]], optional
+            The k-point in reciprocal space at which to compute the phonon
+            frequencies. Given as a 3-element array. Default is [0, 0, 0] (Gamma point).
+        start_mode : int, optional
+            Starting index of the vibrational modes to compute. If set to zero,
+            all modes starting from the lowest frequency will be computed, by default 0.
+        stop_mode : int, optional
+            Ending index (exclusive) of the vibrational modes to compute.
+            If set to zero, all available modes up to the highest frequency will
+            be computed, by default 0.
+        slt_save : str, optional
+            If given, the results will be saved in a group of this name to the
+            corresponding .slt file, by default None.
 
-    def phonon_density_of_states(self, kpoints_grid: Union[int, ndarray], start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDensityOfStates: pass
+        Returns
+        -------
+        SltPhononFrequencies
+            A delayed computation object for phonon frequencies. This object enables
+            further computation, saving, plotting, and reading from the file.
+            The actual results are not immediately computed upon object creation. The
+            resulting numpy arrays (after invoking `eval` or `to_numpy_arrays` methods)
+            are in the form (mode_numbers, frequencies) and give mode numbers
+            and frequencies in cm⁻¹ as 1D arrays.
 
-    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum: pass
-    
-    def animate_normal_modes(self, modes_list: list[int], output_directory: str, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], frames: int = 60, amplitude: float = 0.8, output_prefix: str = "", output_format: Literal["xyz", "pdb"] = "pdb") -> None: pass
+        See Also
+        --------
+        slothpy.plot.phonon_frequencies : For plotting the phonon frequencies.
+
+        Notes
+        -----
+        The computation uses the Hessian matrix stored in the .slt file associated with
+        the group. The dynamical matrix is constructed from the Hessian and masses.
+
+        """
+        pass
+
+    def phonon_dispersion(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDispersion:
+        """
+        Calculates the phonon dispersion along a specified path in the Brillouin zone.
+
+        Computes the phonon frequencies for a sequence of k-points along a
+        specified path in the Brillouin zone, allowing visualization of the
+        phonon dispersion relations.
+
+        Parameters
+        ----------
+        brillouin_zone_path : str, optional
+            String specifying the high-symmetry path in the Brillouin zone.
+            For example, 'GXL' where 'G' stands for Gamma point.
+            If None, a default path is used, by default None.
+        npoints : int, optional
+            Total number of k-points along the path. If None, it is determined
+            automatically based on the path length and density, by default None.
+        density : float, optional
+            Density of k-points per reciprocal lattice unit distance. Used if
+            npoints is None, by default None.
+        special_points : Mapping[str, Sequence[float]], optional
+            Dictionary mapping special point labels to their fractional coordinates.
+            If None, standard special points are used, by default None.
+        symmetry_eps : float, optional
+            Tolerance for symmetry operations when generating the path.
+            Default is 2e-4.
+        start_mode : int, optional
+            Starting index of the vibrational modes to compute. If set to zero,
+            all modes starting from the lowest frequency will be computed, by default 0.
+        stop_mode : int, optional
+            Ending index (exclusive) of the vibrational modes to compute.
+            If set to zero, all available modes up to the highest frequency will
+            be computed, by default 0.
+        number_cpu : int, optional
+            Number of logical CPUs to be assigned to perform the calculation.
+            If set to zero, all available CPUs will be used. If None, the
+            default number from the SlothPy settings is used. See:
+            slothpy.set_number_cpu(), slothpy.settings.number_cpu., by default None.
+        number_threads : int, optional
+            Number of threads used in multithreaded linear algebra libraries during
+            the calculation. Higher values benefit from larger matrices over CPU
+            parallelization. If set to zero, `number_cpu` will be used. If None, the
+            default number from the SlothPy settings is used. See:
+            slothpy.set_number_threads(), slothpy.settings.number_threads., by default None.
+        slt_save : str, optional
+            If given, the results will be saved in a group of this name to the
+            corresponding .slt file, by default None.
+        autotune : bool, optional
+            If True, the program will automatically choose the best number of threads
+            (and parallel processes) for the given number of CPUs during the calculation.
+            Note that this process can take significant time, so use it for
+            medium-sized calculations where it becomes necessary, by default False.
+
+        Returns
+        -------
+        SltPhononDispersion
+            A delayed computation object for phonon dispersion. This object enables
+            further computation, saving, plotting, and reading from the file.
+            The actual results are not immediately computed upon object creation.
+            The resulting data (after invoking `eval`, or `to_numpy_arrays` methods)
+            contains phonon frequencies along the specified path in the Brillouin zone.
+            A delayed computation object for phonon frequencies. This object enables
+            further computation, saving, plotting, and reading from the file.
+            The actual results are not immediately computed upon object creation. The
+            resulting numpy arrays (after invoking `eval` or `to_numpy_arrays` methods)
+            are in the form (x, x_coords, x_labels, kpts, dispersion) where x contains
+            coordinates for the dispersion plotting, x_coords stores coordinates of the
+            special point labels, x_labels contain the special point labels, kpts
+            is an array of k-point path in the fractional coordinates of the reciprocal
+            lattice and dispersion gives frequencies in the form [kpts, modes] in cm⁻¹.
+
+        See Also
+        --------
+        slothpy.plot.phonon_dispersion : For plotting the phonon dispersion relations.
+
+        Notes
+        -----
+        Here, (`number_cpu` // `number_threads`) parallel processes are used to
+        distribute the workload over the provided k-points along the path.
+
+        """
+        pass
+
+    def phonon_density_of_states(self, kpoints_grid: Union[int, ndarray], start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltPhononDensityOfStates:
+        """
+        Calculates the phonon density of states (DOS).
+
+        Computes the phonon density of states over a range of wavenumbers by
+        sampling the Brillouin zone using a specified k-point grid and
+        applying broadening techniques.
+
+        Parameters
+        ----------
+        kpoints_grid : int or ndarray
+            If an integer, specifies the size of a Monkhorst-Pack grid in
+            each reciprocal lattice direction. If an ndarray, specifies the
+            custom k-point grid in the form [[kx, ky, kz]...].
+        start_wavenumber : float
+            Starting wavenumber (in cm⁻¹) for the DOS calculation.
+        stop_wavenumber : float
+            Ending wavenumber (in cm⁻¹) for the DOS calculation.
+        resolution : int
+            Number of points between `start_wavenumber` and `stop_wavenumber`.
+        convolution : {'lorentzian', 'gaussian'}, optional
+            Type of convolution to apply for broadening the DOS.
+            Options are 'lorentzian' or 'gaussian'. Default is None (no broadening).
+        fwhm : float, optional
+            Full width at half maximum (FWHM) for the convolution function,
+            in cm⁻¹. Default is 3 cm⁻¹.
+        number_cpu : int, optional
+            Number of logical CPUs to be assigned to perform the calculation.
+            If set to zero, all available CPUs will be used. If None, the
+            default number from the SlothPy settings is used. See:
+            slothpy.set_number_cpu(), slothpy.settings.number_cpu., by default None.
+        number_threads : int, optional
+            Number of threads used in multithreaded linear algebra libraries during
+            the calculation. Higher values benefit from larger matrices over CPU
+            parallelization. If set to zero, `number_cpu` will be used. If None, the
+            default number from the SlothPy settings is used. See:
+            slothpy.set_number_threads(), slothpy.settings.number_threads., by default None.
+        slt_save : str, optional
+            If given, the results will be saved in a group of this name to the
+            corresponding .slt file, by default None.
+        autotune : bool, optional
+            If True, the program will automatically choose the best number of threads
+            (and parallel processes) for the given number of CPUs during the calculation.
+            Note that this process can take significant time, so use it for
+            medium-sized calculations where it becomes necessary, by default False.
+
+        Returns
+        -------
+        SltPhononDensityOfStates
+            A delayed computation object for phonon density of states. This object
+            allows for further computation, saving, plotting, and reading from the file.
+            The actual results are not immediately computed upon object creation. The
+            resulting numpy arrays (after invoking `eval` or `to_numpy_arrays` methods)
+            are in the form (kpoints_grid, bin_edges, histogram) or (kpoints_grid,
+            bin_edges, histogram, frequency_range, convolution),  when convolution is
+            not None, where kpoints_grid contains the k-point grid used for the
+            calculation [[x,y,z], ...] in the fractional coordinates of the reciprocal
+            lattice, bin_edges is bin edges in cm⁻¹ for the histogram of phonon DOS,
+            histogram stores normalized histogram of the phonon DOS, frequency_range
+            contain frequencies (from start, stop wavenumber) in cm⁻¹ for the DOS
+            plotting and convolution gives normalized DOS values with given broadening
+            and FWHM.
+
+        See Also
+        --------
+        slothpy.plot.phonon_density_of_states : For plotting the phonon DOS.
+
+        Notes
+        -----
+        The k-point sampling grid is used to compute the DOS by integrating over the
+        Brillouin zone. The convolution parameters allow for broadening of the discrete
+        frequencies to simulate experimental conditions.
+
+        Here, (`number_cpu` // `number_threads`) parallel processes are used to
+        distribute the workload over the provided k-points.
+
+        """
+        pass
+
+    def ir_spectrum(self, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = 3, resolution: Optional[int] = None, slt_save: Optional[str] = None) -> SltIrSpectrum:
+        """
+        Calculates the infrared (IR) absorption spectrum.
+
+        Computes the IR spectrum by calculating the frequencies and intensities
+        of vibrational modes that are IR-active, using the Born effective charges.
+
+        Parameters
+        ----------
+        start_wavenumber : float
+            Starting wavenumber (in cm⁻¹) for the IR spectrum.
+        stop_wavenumber : float
+            Ending wavenumber (in cm⁻¹) for the IR spectrum.
+        convolution : {'lorentzian', 'gaussian'}, optional
+            Type of convolution to apply for broadening the spectrum.
+            Options are 'lorentzian' or 'gaussian'. Default is None (no broadening).
+        fwhm : float, optional
+            Full width at half maximum (FWHM) for the convolution function,
+            in cm⁻¹. Default is 3 cm⁻¹.
+        resolution : int, optional
+            Number of points between `start_wavenumber` and `stop_wavenumber`.
+            If None, a default value is used, by default None.
+        slt_save : str, optional
+            If given, the results will be saved in a group of this name to the
+            corresponding .slt file, by default None.
+
+        Returns
+        -------
+        SltIrSpectrum
+            A delayed computation object for the infrared spectrum. This object allows
+            for further computation, saving, plotting, and reading from the file.
+            The actual results are not immediately computed upon object creation. The
+            resulting numpy arrays (after invoking `eval` or `to_numpy_arrays` methods)
+            are in the form (frequencies_intensities,) or (frequencies_intensities,
+            frequency_range_convolution) when convolution is not None, where
+            frequencies_intensities is a 2D array with shape (number_modes, 5) in the
+            form [mode, (0-frequencies, 1-x, 2-y, 3-z, 4-average)] so the first column
+            gives mode frequencies in in cm⁻¹, second to fourth x, y, z, and average
+            intensities, while frequency_range_convolution is in the form [wavenumber,
+            (0-frequencies, 1-x, 2-y, 3-z, 4-average)] so that the first column 
+            consists of frequencies range in cm⁻¹ and the rest is x, y, z, and average
+            convolution.
+
+        See Also
+        --------
+        slothpy.plot.ir_spectrum : For plotting the IR spectrum.
+
+        Notes
+        -----
+        The computation requires the Born effective charges to be present in the
+        Hessian group in .slt file. The IR intensities are computed from the transition
+        dipole moments associated with the vibrational modes. The returned intensities
+        and convolutions are normalizes within group x, y, z considering maximal
+        element among all components while the average is normalized separately.
+
+        """
+        pass
+
+    def animate_normal_modes(self, modes_list: list[int], output_directory: str, kpoint: ndarray[Union[float32, float64]] = [0, 0, 0], frames: int = 60, amplitude: float = 0.8, output_prefix: str = "", output_format: Literal["xyz", "pdb"] = "pdb") -> None:
+        """
+        Creates animations of specified normal modes.
+
+        Generates animated trajectories for the specified normal modes by
+        displacing atoms according to the eigenvectors of the modes and
+        saves the animations in the specified format.
+
+        Parameters
+        ----------
+        modes_list : list[int]
+            List of mode indices to animate. Mode indices start from 0.
+        output_directory : str
+            Directory where the animation files will be saved.
+        kpoint : ndarray[Union[float32, float64]], optional
+            The k-point in reciprocal space for which the normal modes are
+            calculated. Default is [0, 0, 0] (Gamma point).
+        frames : int, optional
+            Number of frames in the animation. Default is 60.
+        amplitude : float, optional
+            Amplitude of atomic displacements in the animation. Default is 0.8 Å.
+        output_prefix : str, optional
+            Prefix for the output file names. Default is an empty string.
+        output_format : {'xyz', 'pdb'}, optional
+            Format of the output animation files. Options are 'xyz' or 'pdb'.
+            Default is 'pdb'.
+
+        Returns
+        -------
+        None
+            No immediate results are returned. The animation (trajectory) files are
+            saved to the specified output directory for further viewing and analysis.
+
+        See Also
+        --------
+
+
+        Notes
+        -----
+        The animations are generated by displacing the atomic positions along the
+        eigenvectors of the specified normal modes. The resulting animations can
+        be viewed using compatible molecular visualization software. For 'xyz' we
+        recomend VMD while for 'pdb' files topology + animation Blender's module
+        MolecularNodes: https://bradyajohnston.github.io/MolecularNodes/.
+
+        """
+        pass
 
     def states_energies_cm_1(self, start_state=0, stop_state=0, slt_save=None) -> SltStatesEnergiesCm1: pass
     
@@ -744,9 +1092,130 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
     def _slt_hamiltonian_from_slt_group(self, states_cutoff=[0,0], rotation=None, hyperfine=None, local_states=True) -> SltHamiltonian : pass
 
-    def zeeman_splitting(self, magnetic_fields: ndarray[Union[float32, float64]], orientations: ndarray[Union[float32, float64]], number_of_states: int = 0, states_cutoff: int = [0, "auto"], rotation: ndarray = None, electric_field_vector: ndarray = None, hyperfine: dict = None, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltZeemanSplitting: pass
-    
-    def magnetisation(self, magnetic_fields: ndarray[Union[float32, float64]], orientations: ndarray[Union[float32, float64]], temperatures: ndarray[Union[float32, float64]], states_cutoff: int = [0, "auto"], rotation: ndarray = None, electric_field_vector: ndarray = None, hyperfine: dict = None, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltMagnetisation: pass
+    def zeeman_splitting(self, magnetic_fields: ndarray[Union[float32, float64]], orientations: ndarray[Union[float32, float64]], number_of_states: int = 0, states_cutoff: int = [0, "auto"], rotation: ndarray = None, electric_field_vector: ndarray = None, hyperfine: dict = None, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltZeemanSplitting:
+        """
+        Calculates directional or powder-averaged Zeeman splitting for a given
+        number of states and a list of magnetic field orientations and values.
+
+        Parameters
+        ----------
+        hamiltonian_group_name : str
+            Name of a Hamiltonian-type group from the corresponding .slt file
+            which will be used to compute the Zeeman splitting.
+        number_of_states : int
+            Number of states whose energy splitting will be given in the result
+            array. If set to zero, states_cutoff[0] states will be given.,
+            by default 0
+        magnetic_fields : ndarray[Union[float32, float64]]
+            ArrayLike structure (can be converted to numpy.NDArray) of magnetic
+            field values (T) at which Zeeman splitting will be computed.
+        orientations : Union[ndarray[Union[float32, float64]], int, list]
+            ArrayLike structure (can be converted to numpy.NDArray) of magnetic
+            field orientations in the list format: [[direction_x, direction_y,
+            direction_z],...]. Users can choose from predefined orientational 
+            grids providing a list or tuple in the form [gird_name,
+            number_of points] where grid_name can be: 'fibonacci', 'mesh',
+            'lebedev_laikov', and number_of_points is an integer controlling
+            the grid density. If the orientations is set to an integer from
+            0-11, the prescribed Lebedev-Laikov grids over the hemisphere will
+            be used (see slothpy.lebedev_laikov_grid_over_hemisphere
+            documentation) and powder-averaging will be performed. Otherwise,
+            the user can provide an ArrayLike structure with the convention:
+            [[direction_x, direction_y, direction_z, weight],...] for
+            powder-averaging over the chosen directions using the provided
+            weights. Custom grids and orientations will be automatically
+            normalized to the unit directional vectors.
+        states_cutoff : list, optional
+            List of integers of length 2 where the first one represents the
+            number of states that will be taken into account for construction
+            of the Zeeman Hamiltonian. If it is set to zero, all available
+            states from the Hamiltonian group will be used. The second integer
+            controls the number of eigenvalues and eigenvectors to be found
+            during Hamiltonian diagonalization. For methods taking
+            number_of_states parameter, the second entry must be at least equal
+            to the desired number of states, while for functions including
+            temperature dependencies, it should be large enough to accommodate
+            states with energies relevant to a given range of temperatures.
+            You can let SlothPy decide automatically on the optimal value of
+            the second parameter setting it to 'auto'. Note that when using
+            custom SlothPy-type exchange Hamiltonian, this argument has no
+            effect since the cutoff scheme is already defined while creating
+            one (see the documentation of SltFile.hamiltonian creation method).
+            , by default [0, 'auto']
+        rotation: Union[ndarray[Union[float32, float64]], SltRotation, Rotation], optional
+            A (3,3) orthogonal rotation matrix, instance of SltRotation class
+            or scipy.spatial.transform.Rotation (only single rotation) used to
+            rotate operators matrices. Note that the inverse matrix has to be
+            given to rotate the reference frame instead.,by default None
+        electric_field_vector: ndarray[Union[float32, float64]], optional
+            ArrayLike structure (can be converted to numpy.NDArray)
+            representing a vector [Fx, Fy, Fz] of static uniform electric field
+            (V/m) to be included in the Hamiltonian., by default None
+        hyperfine: dict, optional
+            Hyperfine interactions are not available yet and are scheduled to
+            be implemented in the upcoming 0.4 major release, by default None
+        number_cpu : int, optional
+            Number of logical CPUs to be assigned to perform the calculation.
+            If set to zero, all available CPUs will be used. If None, the 
+            default number from the SlothPy settings is used. See:
+            slothpy.set_number_cpu(), slothpy.settings.number_cpu.,
+            by default None
+        number_threads : int, optional
+            Number of threads used in a multithreaded implementation of linear
+            algebra libraries during the calculation. Higher values benefit
+            from the increasing size of matrices (states_cutoff) over the
+            parallelization over CPUs. If set to zero, a number_cpu will be
+            used. If None, the default number from the SlothPy settings is used.
+            See: slothpy.set_number_threads, slothpy.settings.number_threads.,
+            by default None
+        slt_save : str, optional
+            If given, the results will be saved in a group of this name to the
+            corresponding .slt file., by default None
+        autotune : bool, optional
+            If True the program will automatically try to choose the best
+            number of threads (and therefore parallel processes), for the given
+            number of CPUs, to be used during the calculation. Note that this
+            process can take a significant amount of time, so start to use it
+            with medium-sized calculations (e.g. for states_cutoff > 300 with
+            dense grids or a higher number of field values) where it becomes
+            a necessity., by default False
+
+        Returns
+        -------
+        SltZeemanSplitting
+            A delayed computation object for Zeeman splitting. This object enables
+            further computation, saving and plotting. The actual results are not
+            immediately computed upon object creation.
+            The resulting numpy array (after invoking `eval` or
+            `to_numpy_arrays` methods) gives Zeeman splitting of number_of_states
+            energy levels in cm⁻¹ for each orientation in the form
+            [orientations, fields, energies] - the first dimension
+            runs over different orientations, the second over field values, and
+            the last gives energies of number_of_states states, unless the
+            orientations argument is of 'mesh' type, then the retuened array is
+            in the form [mesh, mesh, fields, temperatures] - the first two
+            dimensions are in the form of meshgrids over theta and phi angles,
+            ready to be combined with xyz orientational meshgrids for 3D plots
+            (see slothpy.meshgrid_over_hemisphere documentation).
+            When the powder-average calculation is performed, the array is
+            returned in the form: [fields, energies].
+
+        See Also
+        --------
+        slothpy.plot.zeeman, sltohpy.SltRotation, 
+        slothpy.fibonacci_over_hemisphere, slothpy.meshgrid_over_hemisphere,
+        slothpy.lebedev_laikov_grid_over_hemisphere : For the description of
+                                        the prescribed orientations grids.
+
+        Note
+        -----
+        Here, (`number_cpu` // `number_threads`) parallel processes are used to
+        distribute the workload over the provided field and orientation values.
+        """
+        pass
+
+    def magnetisation(self, magnetic_fields: ndarray[Union[float32, float64]], orientations: ndarray[Union[float32, float64]], temperatures: ndarray[Union[float32, float64]], states_cutoff: int = [0, "auto"], rotation: ndarray = None, electric_field_vector: ndarray = None, hyperfine: dict = None, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltMagnetisation:
+        pass
 
 
 ####################
@@ -1087,7 +1556,7 @@ class SltXyz(metaclass=MethodTypeMeta):
         
         return self._slt_group
         
-    def generate_finite_stencil_displacements(self, displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None, _supercell: bool = False, _nx: Optional[int] = None, _ny: Optional[int] = None, _nz: Optional[int] = None) -> Optional[Iterator[Atoms]]:
+    def generate_finite_stencil_displacements(self, displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None, _supercell: bool = False, _nx: Optional[int] = None, _ny: Optional[int] = None, _nz: Optional[int] = None, _dof_dict: Optional[dict] = None) -> Optional[Iterator[Atoms]]:
         if output_option == 'xyz':
             makedirs(custom_directory, exist_ok=True)
 
@@ -1112,20 +1581,25 @@ class SltXyz(metaclass=MethodTypeMeta):
 
         def displacement_generator() -> Iterator[Atoms]:
             zero_geometry_flag = False
-            for dof in range(total_dofs):
+            if _dof_dict is not None:
+                dof_range = _dof_dict.keys()
+            else:
+                dof_range = range(total_dofs)
+            for dof in dof_range:
                 axis = dof % 3
                 atom_idx = dof // 3
+                dof_mapped = dof if _dof_dict is None else _dof_dict[dof]
                 for multiplier in range(-displacement_number, displacement_number + 1):
                     if multiplier == 0 and zero_geometry_flag:
                         continue
                     elif multiplier == 0:
                         zero_geometry_flag = True
-                        yield (atoms_tmp, dof, multiplier, _nx, _ny, _nz) if n_checked else (atoms_tmp, dof, multiplier)
+                        yield (atoms_tmp, 0, multiplier, _nx, _ny, _nz) if n_checked else (atoms_tmp, 0, multiplier)
                         continue
                     displaced_atoms = atoms_tmp.copy()
                     displacement = multiplier * step
                     displaced_atoms.positions[atom_idx, axis] += displacement
-                    yield (displaced_atoms, dof, multiplier, step, _nx, _ny, _nz) if n_checked else (displaced_atoms, dof, multiplier, step)
+                    yield (displaced_atoms, dof_mapped, multiplier, step, _nx, _ny, _nz) if n_checked else (displaced_atoms, dof_mapped, multiplier, step)
 
         if output_option == 'xyz':
             for displacement_info in displacement_generator():
@@ -1168,6 +1642,35 @@ class SltXyz(metaclass=MethodTypeMeta):
             except Exception as exc:
                 raise SltFileError(self._slt_group._hdf5, exc, f"Failed to write displacement Group '{slt_group_name}' to the .slt file") from None
             return SltGroup(self._slt_group._hdf5, slt_group_name)
+
+    def generate_finite_stencil_displacements_reduced_to_unit_cell(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
+        xyz_atoms_postions = self.atoms_object().get_positions()
+        unit_cell = SltGroup(self._slt_group._hdf5, unit_cell_group_name).atoms_object
+        unit_cell_atom_postions = unit_cell.get_positions()
+        cell_vectors = unit_cell.get_cell()
+
+        distances = norm(xyz_atoms_postions - central_atom, axis=1)
+        difference = unit_cell_atom_postions[newaxis, :, :] - xyz_atoms_postions[:, newaxis, :]
+        n_vectors = einsum('ijk,kl->ijl', difference, inv(cell_vectors))
+        check_vectors = is_approximately_integer(n_vectors, 0.005)
+        matching_indices = where(all(check_vectors, axis=2))
+        match_candidates = list(zip(distances[matching_indices[0]], matching_indices[0], matching_indices[1]))
+        match_candidates.sort()
+
+        assigned_atoms_xyz = set()
+        assigned_atoms_unit_cell = set()
+
+        dof_dict = {}
+
+        for (distance, atom_xyz, atom_unit_cell) in match_candidates:
+            if atom_xyz not in assigned_atoms_xyz and atom_unit_cell not in assigned_atoms_unit_cell:
+                dof_dict[3 * atom_xyz] = 3 * atom_unit_cell
+                dof_dict[3 * atom_xyz + 1] = 3 * atom_unit_cell + 1
+                dof_dict[3 * atom_xyz + 2] = 3 * atom_unit_cell + 2
+                assigned_atoms_xyz.add(atom_xyz)
+                assigned_atoms_unit_cell.add(atom_unit_cell)
+
+        return self.generate_finite_stencil_displacements(displacement_number, step, output_option, custom_directory, slt_group_name, _dof_dict=dof_dict)
 
 
 class SltUnitCell(SltXyz):

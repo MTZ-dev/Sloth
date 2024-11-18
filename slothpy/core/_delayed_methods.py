@@ -44,7 +44,7 @@ from slothpy._lattice_dynamics._phonon_density_of_states import _phonon_density_
 
 
 class SltStatesEnergiesCm1(_SingleProcessed):
-    _method_name = "States' Energies in cm-1"
+    _method_name = "States' Energies in cm⁻¹"
     _method_type = "STATES_ENERGIES_CM1"
 
     __slots__ = _SingleProcessed.__slots__ + ["_start_state", "_stop_state"]
@@ -63,9 +63,9 @@ class SltStatesEnergiesCm1(_SingleProcessed):
             "Kind": "CM_1",
             "States": self._result.shape[0],
             "Precision": settings.precision.upper(),
-            "Description": f"States' energies in cm-1 from Group '{self._group_name}'."
+            "Description": f"States' energies in cm⁻¹ from Group '{self._group_name}'."
         }
-        self._data_dict = {"STATES_ENERGIES_CM_1": (self._result,  "States' energies in cm-1.")}
+        self._data_dict = {"STATES_ENERGIES_CM_1": (self._result,  "States' energies in cm⁻¹.")}
 
     def _load_from_slt_file(self):
         self._result = self._slt_group["STATES_ENERGIES_CM_1"][:]
@@ -107,7 +107,7 @@ class SltStatesEnergiesAu(_SingleProcessed):
             "Precision": settings.precision.upper(),
             "Description": f"States' energies in a.u. from Group '{self._group_name}'."
         }
-        self._data_dict = {"STATES_ENERGIES_AU": (self._result, "States' energies in cm-1.")}
+        self._data_dict = {"STATES_ENERGIES_AU": (self._result, "States' energies in cm⁻¹.")}
 
     def _load_from_slt_file(self):
         self._result = self._slt_group["STATES_ENERGIES_AU"][:]
@@ -420,7 +420,7 @@ class SltStatesTotalAngularMomenta(_SingleProcessed):
     _method_type = "STATES_TOTAL_ANGULAR_MOMENTA"
 
     __slots__ = _SingleProcessed.__slots__ + ["_xyz", "_start_state", "_stop_state", "_rotation"]
-     
+    
     def __init__(self, slt_group, xyz='xyz', start_state=0, stop_state=0, rotation=None, slt_save=None) -> None:
         super().__init__(slt_group, slt_save)
         self._xyz = xyz
@@ -559,7 +559,7 @@ class SltPhononFrequencies(_SingleProcessed):
             "Precision": settings.precision.upper(),
             "Description": f"{self._method_name} calculated from Group '{self._group_name}'."
         }
-        self._data_dict = {"FREQUENCIES": (self._result[1], "Dataset containing mode frequencies in cm-1."),
+        self._data_dict = {"FREQUENCIES": (self._result[1], "Dataset containing mode frequencies in cm⁻¹."),
                            "MODE_NUMBER": (self._result[0], "Dataset containing mode numbers corresponding to the calculated frequencies.")}
 
     def _load_from_slt_file(self):
@@ -603,11 +603,10 @@ class SltIrSpectrum(_SingleProcessed):
             "Description": f"IR intensities{"" if self._convolution is None else " and convoluted spectra"} calculated from Group '{self._group_name}'."
         }
         
-        if self._convolution is None:
-            self._data_dict = {"INTENSITIES": (self._result[0], "Dataset containing mode frequencies in cm-1 and intensities for xyz polarizations in the form [freq, x, y, z, average].")}
-        else:
-            self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm-1 Type = {self._convolution}"
-            self._data_dict["CONVOLUTION"] = (self._result[1], f"Data set containing convoluted specta using {self._convolution} broadening with FWHM = {self._fwhm} cm-1 in the form [wave_number, x, y, z, average].")
+        self._data_dict = {"INTENSITIES": (self._result[0], "Dataset containing mode frequencies in cm⁻¹ and intensities for xyz polarizations in the form [mode, (0-frequencies, 1-x, 2-y, 3-z, 4-average)].")}
+        if self._convolution is not None:
+            self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm⁻¹ Type = {self._convolution}"
+            self._data_dict["CONVOLUTION"] = (self._result[1], f"Data set containing convoluted specta using {self._convolution} broadening with FWHM = {self._fwhm} cm⁻¹ in the form [wavenumber, (0-frequencies, 1-x, 2-y, 3-z, 4-average)].")
     
     def _load_from_slt_file(self):
         if self._slt_group.attributes["Kind"] == "INTENSITIES":
@@ -942,7 +941,7 @@ class SltPhononDispersion(_MultiProcessed):
         self._result = empty((len(self._x), self._stop_mode - self._start_mode), dtype=settings.float, order="C")
 
     def _return(self):
-        return self._result, self._x, self._x_coords, self._x_labels, self._kpts
+        return self._x, self._x_coords, self._x_labels, self._kpts, self._result
 
     def _save(self):
         self._metadata_dict = {
@@ -951,9 +950,9 @@ class SltPhononDispersion(_MultiProcessed):
             "Description": f"Group containing {self._method_name} calculated from Group '{self._group_name}'."
         }
         self._data_dict = {
-            f"{self._method_type}": (self._result, f"Dataset containing {self._method_name} in the form [kpts, frequencies] in cm-1."),
+            f"{self._method_type}": (self._result, f"Dataset containing {self._method_name} in the form [kpts, frequencies] in cm⁻¹."),
             "X": (self._x, "Dataset containing X coordinates for the dispersion plotting."),
-            "X_COORDS": (self._x_coords, "Dataset containing X coordiantes of the special point labels."),
+            "X_COORDS": (self._x_coords, "Dataset containing X coordinates of the special point labels."),
             "X_LABELS": (self._x_labels, "Dataset containing the special point labels."),
             "KPTS_PATH": (self._kpts, "Dataset containing the k-point path in the fractional coordinates of the reciprocal lattice.")
         }
@@ -1036,6 +1035,9 @@ class SltPhononDensityOfStates(_MultiProcessed):
 
                 return bin_edges, hist / max(hist), frequency_range, convolution / max(convolution)
 
+    def _return(self):
+        return (self._kpoints_grid, *self._result)
+
     def _save(self):
         self._metadata_dict = {
             "Type": self._method_type,
@@ -1043,21 +1045,15 @@ class SltPhononDensityOfStates(_MultiProcessed):
             "Precision": settings.precision.upper(),
             "Description": f"Group containing {self._method_name} calculated from Group '{self._group_name}'."
         }
-        if self._convolution is None:
-            self._data_dict = {
-                "BIN_EDGES": (self._result[0], "Dataset containing bin edges in cm-1 for the histogram of phonon DOS."),
-                "HISTOGRAM": (self._result[1], "Dataset containing histogram of the phonon DOS."),
-                "KPTS_GRID": (self._kpoints_grid, "Dataset containing the k-point grid in the fractional coordinates of the reciprocal lattice used for the phonon DOS calculation.")
-            }
-        else:
-            self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm-1 Type = {self._convolution}"
-            self._data_dict = {
-                "BIN_EDGES": (self._result[0], "Dataset containing bin edges in cm-1 for the histogram of phonon DOS."),
-                "HISTOGRAM": (self._result[1], "Dataset containing histogram of the phonon DOS."),
-                "FREQUENCIES": (self._result[2], "Dataset containing frequencies in cm-1 for the phonon DOS."),
-                "CONVOLUTION": (self._result[3], f"Dataset containing phonon DOS with {self._convolution} broadening, where FWHM = {self._fwhm} cm-1."),
-                "KPTS_GRID": (self._kpoints_grid, "Dataset containing the k-point grid in the fractional coordinates of the reciprocal lattice used for the phonon DOS calculation.")
-            }
+        self._data_dict = {
+            "KPTS_GRID": (self._kpoints_grid, "Dataset containing the k-point grid in the fractional coordinates of the reciprocal lattice used for the phonon DOS calculation."),
+            "BIN_EDGES": (self._result[0], "Dataset containing bin edges in cm⁻¹ for the histogram of phonon DOS."),
+            "HISTOGRAM": (self._result[1], "Dataset containing histogram of the phonon DOS."),
+        }
+        if self._convolution is not None:
+            self._metadata_dict["FWHM"] = f"FWHM = {self._fwhm} cm⁻¹ Type = {self._convolution}"
+            self._data_dict["FREQUENCIES"] = (self._result[2], "Dataset containing frequencies in cm⁻¹ for the phonon DOS.")
+            self._data_dict["CONVOLUTION"] = (self._result[3], f"Dataset containing phonon DOS with {self._convolution} broadening, where FWHM = {self._fwhm} cm⁻¹.")
 
     def _load_from_slt_file(self):
         if self._slt_group.attributes["Kind"] == "HISTOGRAM":

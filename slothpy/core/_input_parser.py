@@ -349,6 +349,17 @@ def validate_input(func):
                         value = settings.float(value)
                         if value <= 0:
                             raise ValueError("Amplitude must be greater than zero.")
+                    case "unit_cell_group_name":
+                        if SltGroup(slt_group._hdf5, value).attributes["Type"] != "UNIT_CELL":
+                            raise ValueError(f"The given name of a unit cell {BLUE}Group{RESET}: '{value}' does not correspond to a valid {GREEN}UNIT_CELL{RESET} group in the .slt file.")
+                    case "central_atom":
+                        try:
+                            value = asarray(value, order='C', dtype=settings.float)
+                        except Exception:
+                            raise ValueError("The central_atom parameter must be an arraylike object of floats.")
+                        if value.ndim != 1 or len(value) != 3:
+                            raise ValueError("The central_atom parameter must be a 1D array in the form [x, y, z] in Å.")
+
 
                 bound_args.arguments[name] = value
                 
