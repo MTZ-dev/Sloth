@@ -113,10 +113,13 @@ def parse_xyz_file(xyz_filename):
 
     return charge, multiplicity, atoms, lanthanide_element, lanthanide_index
 
-def build_basis_section(atoms, lanthanide_element):
+def build_basis_section(atoms, lanthanide_element, expbas):
     # Build the BASIS section
     basis_section = "%basis\n"
-    basis_section += f"  newGTO {lanthanide_element} \"SARC2-DKH-QZV\" end\n"
+    if expbas:
+        basis_section += f"  newGTO {lanthanide_element} \"SARC2-DKH-QZVP\" end\n"
+    else:
+        basis_section += f"  newGTO {lanthanide_element} \"SARC2-DKH-QZV\" end\n"
 
     # Track elements already added to the basis section
     basis_elements = []
@@ -194,7 +197,7 @@ end
 
     return input_filename
 
-def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp_file, tmp_dir):
+def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp_file, tmp_dir, expbas):
     # Function to generate the CASSCF input file using the specified %moinp file
     input_filename = f'{project_name}.inp' 
     input_file = os.path.join(tmp_dir, input_filename)
@@ -227,7 +230,7 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
     center_list = ', '.join([str(lanthanide_index)] * norb)
 
     # Build the BASIS section
-    basis_section = build_basis_section(atoms, lanthanide_element)
+    basis_section = build_basis_section(atoms, lanthanide_element, expbas)
 
     # Handle NEVPT2 option
     if use_nevpt2:
@@ -236,7 +239,7 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
         ptmethod_line = ""
 
     # Build the ORCA input content for the CASSCF calculation
-    input_content = f"""! CASSCF DKH2 DKH-def2-SVP AutoAux RIJCOSX TRAH VerySlowConv VeryTightSCF
+    input_content = f"""! CASSCF DKH2 {"ma-" if expbas else ""}DKH-def2-SVP AutoAux RIJCOSX TRAH VerySlowConv VeryTightSCF
 
 %maxcore {int(max_memory // cpus)}
 
@@ -331,8 +334,9 @@ def cleanup_files(tmp_dir, project_name):
 def process_initial_pbe_guess(cpus, max_memory, orca_path):
     project_name = 'dof_0_disp_0_guess'
     qro_file = f'{project_name}.qro'
-    if os.path.exists(qro_file):
-        print(f"Skipping initial PBE calculation for {project_name}, .qro file already exists.")
+    gbw_file = f'{project_name}.gbw'
+    if os.path.exists(qro_file) or os.path.exists(gbw_file):
+        print(f"Skipping initial PBE calculation for {project_name}, {".gbw" if os.path.exists(gbw_file) else ".qro"} file already exists.")
         return
     
     tmp_dir = f'tmp_{project_name}'
@@ -354,10 +358,10 @@ def process_initial_pbe_guess(cpus, max_memory, orca_path):
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
 
-def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2):
+def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_different_lanthanide):
     project_name = 'dof_0_disp_0'
     gbw_file = f'{project_name}.gbw'
-    if os.path.exists(gbw_file):
+    if os.path.exists(gbw_file) and not start_from_different_lanthanide:
         print(f"Skipping initial CASSCF calculation for {project_name}, .gbw file already exists.")
         return
 
@@ -365,13 +369,14 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2):
     os.makedirs(tmp_dir, exist_ok=True)
 
     try:
-        qro_file = f'dof_0_disp_0_guess.qro'
-        if not os.path.exists(qro_file):
-            raise ValueError(f"Required .qro file {qro_file} not found. Ensure the initial PBE calculation has completed.")
+        start_extension = ".gbw" if start_from_different_lanthanide else ".qro"
+        start_file = f'dof_0_disp_0_guess{start_extension}'
+        if not os.path.exists(start_file):
+            raise ValueError(f"Required {start_extension} file {start_file} not found. Ensure the initial {".gbw file (from different lanthanide calculation) is in the directory" if start_from_different_lanthanide else "PBE calculation has completed"}.")
         # Copy the .qro file into the temporary directory
-        shutil.copy(qro_file, tmp_dir)
+        shutil.copy(start_file, tmp_dir)
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, qro_file, tmp_dir)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, start_file, tmp_dir, False)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -386,8 +391,35 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2):
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
 
+def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
+    project_name = 'dof_0_disp_0'
+    gbw_file = f'{project_name}.gbw'
+    if not os.path.exists(gbw_file):
+        raise ValueError(f"The .gbw file {gbw_file} required for the basis expansion not found. Ensure the CASSCF calculation for dof_0_disp_0 has completed or you correctly provided your own .gbw file.")
+
+    tmp_dir = f'tmp_{project_name}'
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    try:
+        shutil.copy(gbw_file, tmp_dir)
+
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, gbw_file, tmp_dir, True)
+        output_file = os.path.join(tmp_dir, f'{project_name}.out')
+
+        run_orca(input_file, output_file, orca_path, tmp_dir)
+
+        # Move .gbw file back to the main directory
+        gbw_file = os.path.join(tmp_dir, f'{project_name}.gbw')
+        if os.path.exists(gbw_file):
+            shutil.move(gbw_file, f'{project_name}.gbw')
+        else:
+            raise ValueError(f"Expand basis calculation for {project_name} failed to generate the .gbw file. Cannot proceed.")
+    finally:
+        # Clean up the temporary directory and move the .out file back to the main directory
+        cleanup_files(tmp_dir, project_name)
+
 def process_dof_disp(args_tuple):
-    dof_disp, cpus, max_memory, orca_path, use_nevpt2 = args_tuple
+    dof_disp, cpus, max_memory, orca_path, use_nevpt2, expbas = args_tuple
     dof_number, disp_number = dof_disp
     project_name = f'dof_{dof_number}_disp_{disp_number}'
     tmp_dir = f'tmp_{project_name}'
@@ -396,11 +428,11 @@ def process_dof_disp(args_tuple):
     try:
         gbw_file = f'dof_0_disp_0.gbw'
         if not os.path.exists(gbw_file):
-            raise ValueError(f"Required .gbw file {gbw_file} not found. Ensure the CASSCF calculation for dof_0_disp_0 has completed.")
+            raise ValueError(f"Required .gbw file {gbw_file} not found. Ensure the CASSCF calculation for dof_0_disp_0 has completed or you correctly provided your own .gbw file.")
         # Copy the .gbw file into the temporary directory
         shutil.copy(gbw_file, tmp_dir)
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, gbw_file, tmp_dir)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, gbw_file, tmp_dir, expbas)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -415,7 +447,9 @@ def main():
     parser.add_argument('--processes', type=int, default=1, help='Number of concurrent processes.')
     parser.add_argument('--orca_path', type=str, required=True, help='Path to the ORCA executable.')
     parser.add_argument('--max_memory', type=float, required=True, help='Total maximum memory in MB for the calculation.')
-    parser.add_argument('--use_nevpt2', action='store_true', help='Use NEVPT2 by uncommenting ptmethod SC_NEVPT2 in the input file.')
+    parser.add_argument('--use_nevpt2', action='store_true', help='Use NEVPT2 with ptmethod SC_NEVPT2 in the input file.')
+    parser.add_argument('--expbas', action='store_true', help='Expand basis to SARC2-DKH-QZVP for the lanthanide ion and ma-DKH-def2-SVP for others up to Kr.')
+    parser.add_argument('--start_from_different_lanthanide', action='store_true', help='If a .gbw file is present in the directory the script recalculates the guess assuming that it corresponds to a different lanthanide ion from a previous calculation. The initial .gbw file is being overwritten!')
 
     args = parser.parse_args()
 
@@ -428,7 +462,11 @@ def main():
 
     # Then, process the CASSCF calculation for dof_0_disp_0 using all CPUs
     print("Starting CASSCF calculation for dof_0_disp_0...")
-    process_initial_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2)
+    process_initial_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2, args.start_from_different_lanthanide)
+
+    if args.expbas:
+        print("Starting expand basis CASSCF calculation for dof_0_disp_0...")
+        process_expbas_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2, args.start_from_different_lanthanide)
 
     # Prepare the list of dof_disp combinations to process in parallel (excluding dof_0_disp_0)
     xyz_files = glob.glob('dof_*_disp_*.xyz')
@@ -456,7 +494,7 @@ def main():
         print('Processing calculations in parallel...')
         try:
             cpus_per_process = total_cpus // processes
-            pool_args = [((dof_disp_list[i]), cpus_per_process, args.max_memory, args.orca_path, args.use_nevpt2) for i in range(len(dof_disp_list))]
+            pool_args = [((dof_disp_list[i]), cpus_per_process, args.max_memory, args.orca_path, args.use_nevpt2, args.expbas) for i in range(len(dof_disp_list))]
 
             with Pool(processes=processes) as pool:
                 for _ in tqdm(pool.imap_unordered(process_dof_disp, pool_args), total=len(pool_args)):
