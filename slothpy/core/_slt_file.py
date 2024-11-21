@@ -996,12 +996,12 @@ class SltGroup(metaclass=MethodDelegateMeta):
             are in the form (frequencies_intensities,) or (frequencies_intensities,
             frequency_range_convolution) when convolution is not None, where
             frequencies_intensities is a 2D array with shape (number_modes, 5) in the
-            form [mode, (0-frequencies, 1-x, 2-y, 3-z, 4-average)] so the first column
+            form [(0-frequencies, 1-x, 2-y, 3-z, 4-average), mode] so the first row
             gives mode frequencies in in cm⁻¹, second to fourth x, y, z, and average
-            intensities, while frequency_range_convolution is in the form [wavenumber,
-            (0-frequencies, 1-x, 2-y, 3-z, 4-average)] so that the first column 
-            consists of frequencies range in cm⁻¹ and the rest is x, y, z, and average
-            convolution.
+            intensities, while frequency_range_convolution is in the form
+            [(0-frequencies, 1-x, 2-y, 3-z, 4-average), wavenumber,] so that the first
+            row consists of frequencies range in cm⁻¹ and the rest is x, y, z, and
+            average convolution.
 
         See Also
         --------
@@ -1053,7 +1053,6 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
         See Also
         --------
-
 
         Notes
         -----
@@ -1533,7 +1532,7 @@ class SltXyz(metaclass=MethodTypeMeta):
         if self._method_type in ["UNIT_CELL", "SUPERCELL"]:
             additional_info += f"{"Cell" if self._method_type == "UNIT_CELL" else "Supercell"} parameters [a, b, c, alpha, beta, gamma]: {self._atoms.get_cell_lengths_and_angles().tolist()} "
         if self._method_type == "SUPERCELL":
-            additional_info += f"Supercell_Repetitions [nx, ny, nz] = {self._nxnynz.tolist()} "
+            additional_info += f"Supercell_Repetitions [nx, ny, nz]: {self._nxnynz.tolist()} "
         
         write(xyz_filepath, self._atoms, comment=f"{additional_info}Created by SlothPy from File/Group '{self._slt_group._hdf5}/{self._slt_group._group_name}'")
 
@@ -1613,7 +1612,7 @@ class SltXyz(metaclass=MethodTypeMeta):
                     if self._multiplicity is not None:
                         additional_info += f"Multiplicity: {self._multiplicity} "
                     if n_checked:
-                        additional_info += f"Supercell_Repetitions [nx, ny, nz] = {[_nx, _ny, _nz]} "
+                        additional_info += f"Supercell_Repetitions [nx, ny, nz]: {[_nx, _ny, _nz]} "
                     if self._method_type in ["UNIT_CELL", "SUPERCELL"]:
                         additional_info += f"{"Cell" if self._method_type == "UNIT_CELL" and not _supercell else "Supercell"} parameters [a, b, c, alpha, beta, gamma]: {atoms_tmp.get_cell_lengths_and_angles().tolist()} "
                     write(xyz_file_path, displaced_atoms, comment=f"{additional_info}Created by SlothPy from File/Group '{self._slt_group._hdf5}/{self._slt_group._group_name}")
