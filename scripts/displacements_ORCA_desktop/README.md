@@ -55,7 +55,7 @@ This script automates ORCA calculations of displacement directories created by S
   - **Provide Your Own Starting Files (Optional):**
   - You can provide your own `dof_0_disp_0_guess.qro` or `dof_0_disp_0.gbw` files if you wish to skip the initial PBE or CASSCF calculations.
   - If these files are present, the script will detect them and skip the corresponding calculations.
-  - If you choose the `--start_from_different_lanthanide` option your .gbw file can correspond to the different lanthanide (presumably easier to converge such as Ce(III) or Yb(III)) and the script will recalculate the guess overwriting your initial .gbw file!
+  - If you choose the `--start_from_different_lanthanide` option your .gbw file can correspond to the different lanthanide (presumably easier to converge such as Ce(III) or Yb(III)) and the script will recalculate the guess overwriting your initial .gbw file! (This can also be simply used to recalculate the guess)
   - You can set the `--expbas` option to further expand the initial basis to SARC2-DKH-QZVP for the lanthanide ion and ma-DKH-def2-SVP for others up to Kr.
 
 - **File Structure:**
@@ -185,7 +185,7 @@ python run_displacements_ORCA.py --cpus 64 --processes 4 --orca_path /usr/local/
   - Ensure that all required parameters (`nel`, `S_list`, `NDoubGtensor`) are provided.
 
 - **Support:**
-  - For assistance with the script, you may need to consult with me mikolaj,zychowicz@uj.edu.pl.
+  - For assistance with the script, you may need to consult with me mikolaj.zychowicz@uj.edu.pl.
 
 ---
 

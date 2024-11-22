@@ -87,3 +87,6 @@ python run_displacements_CP2K.py --cpus 64 --processes 2 --threads 2 --version 2
 **Note:** Customize the script and input files according to your computational requirements to ensure accurate and efficient simulations.
 
 **Additionally:** Directory contains an example of an input file for unit cell/supercell optimization example_opt.inp (with XYZ file YCo.xyz) that can be used to obtain relaxed geometries for finite displacement force calculations - remember to adjust cell parameters in subsys.inc.
+
+**Support:**
+  - For assistance with the script, you may need to consult with me mikolaj.zychowicz@uj.edu.pl.
