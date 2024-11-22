@@ -17,7 +17,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
-import sys
+import time
+import signal
 import argparse
 import glob
 import re
@@ -113,7 +114,7 @@ def parse_xyz_file(xyz_filename):
 
     return charge, multiplicity, atoms, lanthanide_element, lanthanide_index
 
-def build_basis_section(atoms, lanthanide_element, expbas):
+def build_basis_section(atoms, lanthanide_element, expbas=False):
     # Build the BASIS section
     basis_section = "%basis\n"
     if expbas:
@@ -163,7 +164,7 @@ def generate_input_file_pbe_guess(cpus, max_memory, tmp_dir):
     basis_section = build_basis_section(atoms, lanthanide_element)
 
     # Build the ORCA input content for the initial PBE calculation
-    input_content = f"""! PBE DKH2 DKH-def2-SVP AutoAux RIJCOSX LOOSESCF VerySlowConv UNO
+    input_content = f"""! PBE DKH2 DKH-def2-SVP AutoAux RIJCOSX NormalSCF NoFrozenCore SlowConv UNO
 
 {basis_section}
 
@@ -197,7 +198,7 @@ end
 
     return input_filename
 
-def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp_file, tmp_dir, expbas, expbas_guess=False):
+def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp_file, tmp_dir, expbas, expbas_guess=False, run_expbas=False):
     # Function to generate the CASSCF input file using the specified %moinp file
     input_filename = f'{project_name}.inp' 
     input_file = os.path.join(tmp_dir, input_filename)
@@ -238,27 +239,15 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
     else:
         ptmethod_line = ""
     
-    rel = "" if expbas_guess else """
+    rel = "" if expbas_guess else f"""
  rel
   printlevel 5
   dosoc true
   gtensor true
   NDoubGtensor {NDoubGtensor}
  end"""
-
-    # Build the ORCA input content for the CASSCF calculation
-    input_content = f"""! CASSCF DKH2 {"ma-" if expbas else ""}DKH-def2-SVP AutoAux RIJCOSX VerySlowConv {"StrongSCF" if expbas_guess else "VeryTightSCF"}
-
-%maxcore {int(max_memory // cpus)}
-
-%pal
-  nprocs {cpus}
-end
-
-%scf
-  AutoTrahIter 200
-  maxiter 3000
-  AVAS
+    
+    avas = "" if moinp_file.endswith(".gbw") and not run_expbas else f"""AVAS
    system
     nel {nel}
     norb {norb}
@@ -267,7 +256,21 @@ end
     m_l {m_l_list}
     center {center_list}
     end
-  end
+  end"""
+
+    # Build the ORCA input content for the CASSCF calculation
+    input_content = f"""! CASSCF DKH2 {"ma-" if expbas else ""}DKH-def2-SVP AutoAux RIJCOSX NoFrozenCore VerySlowConv {"StrongSCF" if expbas_guess else "VeryTightSCF"}
+
+%maxcore {int(max_memory // cpus)}
+
+%pal
+  nprocs {cpus}
+end
+
+%scf
+  AutoTrahIter 150
+  maxiter 3000
+  {avas}
 end
 
 %rel
@@ -295,6 +298,7 @@ end
 
 {basis_section}
 
+! MOREAD
 %moinp "{moinp_file}"
 
 * xyzfile {charge} {multiplicity} ../{xyz_filename}
@@ -315,24 +319,32 @@ def run_orca(input_file, output_file, orca_path, tmp_dir):
         with open(output_file, 'w') as outfile:
             process = subprocess.Popen(command, stdout=outfile, stderr=subprocess.STDOUT, env=env, cwd=tmp_dir)
             process.communicate()
-            exit_code = process.returncode
+            exit_code = process.wait()
+            time.sleep(1)
             if exit_code != 0:
                 print(f"ORCA exited with code {exit_code} for {input_file}")
-                raise Exception(f"ORCA error with exit code {exit_code}")
+                raise KeyboardInterrupt(f"ORCA error with exit code {exit_code}")
     except KeyboardInterrupt:
         print(f"KeyboardInterrupt caught in run_orca for {input_file}. Terminating process.")
         process.terminate()
-        sys.exit(1)
+        process.communicate()
+        process.wait()
+        time.sleep(1)
+        raise
 
 def cleanup_files(tmp_dir, project_name):
     # Remove the temporary directory and all its contents
     if os.path.exists(tmp_dir):
         try:
             output_file = os.path.join(tmp_dir, f'{project_name}.out')
-            shutil.move(output_file, f'{project_name}.out')
+            if os.path.exists(output_file):
+                print(f"Moving {project_name}.out file back to the main directory for inspection. If it is not complete remove or rename it before restarting the calculation!", flush=True)
+                shutil.move(output_file, f'{project_name}.out')
+            print(f"Clearing the temporary directory {tmp_dir}", flush=True)
             shutil.rmtree(tmp_dir)
         except Exception as e:
             print(f"Error moving .out file or deleting temporary directory {tmp_dir}: {e}")
+            raise
 
 def process_initial_pbe_guess(cpus, max_memory, orca_path):
     project_name = 'dof_0_disp_0_guess'
@@ -345,21 +357,27 @@ def process_initial_pbe_guess(cpus, max_memory, orca_path):
     tmp_dir = f'tmp_{project_name}'
     os.makedirs(tmp_dir, exist_ok=True)
 
+    raise_on_exit = False
+
     try:
         input_file = generate_input_file_pbe_guess(cpus, max_memory, tmp_dir)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
-
+    except Exception:
+        raise
     finally:
         # Move the .qro file back to the main directory
         qro_file = os.path.join(tmp_dir, f'{project_name}.qro')
         if os.path.exists(qro_file):
+            print("Moving .qro file back to the main directory...")
             shutil.move(qro_file, f'{project_name}.qro')
         else:
-            raise ValueError(f"Calculation for {project_name} failed to generate the .qro file. Cannot proceed.")
+            raise_on_exit = True
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
+        if raise_on_exit:
+            raise ValueError(f"Calculation for {project_name} failed to generate the .qro file. Cannot proceed.")
 
 def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_different_lanthanide, expbas):
     project_name = 'dof_0_disp_0'
@@ -370,6 +388,8 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_d
 
     tmp_dir = f'tmp_{project_name}'
     os.makedirs(tmp_dir, exist_ok=True)
+
+    raise_on_exit = False
 
     try:
         start_extension = ".gbw" if start_from_different_lanthanide else "_guess.qro"
@@ -383,16 +403,20 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_d
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
-
+    except Exception:
+        raise
     finally:
         # Move .gbw file back to the main directory
         gbw_file = os.path.join(tmp_dir, f'{project_name}.gbw')
         if os.path.exists(gbw_file):
+            print("Moving .gbw file back to the main directory...")
             shutil.move(gbw_file, f'{project_name}.gbw')
         else:
-            raise ValueError(f"Calculation for {project_name} failed to generate the .gbw file. Cannot proceed.")
+            raise_on_exit = True
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
+        if raise_on_exit:
+            raise ValueError(f"Calculation for {project_name} failed to generate the .gbw file. Cannot proceed.")
 
 def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
     project_name = 'dof_0_disp_0'
@@ -404,9 +428,10 @@ def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
     os.makedirs(tmp_dir, exist_ok=True)
 
     try:
-        shutil.copy(gbw_file, tmp_dir)
+        gbw_file_tmp = os.path.join(tmp_dir, 'dof_0_disp_0_guess.gbw')
+        shutil.copy(gbw_file, gbw_file_tmp)
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, gbw_file, tmp_dir, True)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, 'dof_0_disp_0_guess.gbw', tmp_dir, True, run_expbas=True)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -417,16 +442,26 @@ def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
             shutil.move(gbw_file, f'{project_name}.gbw')
         else:
             raise ValueError(f"Expand basis calculation for {project_name} failed to generate the .gbw file. Cannot proceed.")
+    except Exception:
+        raise
     finally:
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
 
 def process_dof_disp(args_tuple):
+
     dof_disp, cpus, max_memory, orca_path, use_nevpt2, expbas = args_tuple
     dof_number, disp_number = dof_disp
     project_name = f'dof_{dof_number}_disp_{disp_number}'
     tmp_dir = f'tmp_{project_name}'
     os.makedirs(tmp_dir, exist_ok=True)
+
+    def handle_sigterm(signum, frame):
+        print(f"KeyboardInterrupt or termination signal caught in {project_name}...")
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigterm)
 
     try:
         gbw_file = f'dof_0_disp_0.gbw'
@@ -439,7 +474,8 @@ def process_dof_disp(args_tuple):
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
-
+    except Exception:
+        raise
     finally:
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
@@ -459,9 +495,12 @@ def main():
     total_cpus = args.cpus
     processes = args.processes
 
-    # First, process the initial PBE calculation for dof_0_disp_0_guess using all CPUs
-    print("Starting initial PBE calculation for dof_0_disp_0_guess...")
-    process_initial_pbe_guess(total_cpus, args.max_memory, args.orca_path)
+    if (args.start_from_different_lanthanide):
+        print("Skipping the initial PBE calculation for dof_0_disp_0_guess as restart from different lanthanide's .gbw was requested.")
+    else:
+        # First, process the initial PBE calculation for dof_0_disp_0_guess using all CPUs
+        print("Starting initial PBE calculation for dof_0_disp_0_guess...")
+        process_initial_pbe_guess(total_cpus, args.max_memory, args.orca_path)
 
     # Then, process the CASSCF calculation for dof_0_disp_0 using all CPUs
     print("Starting CASSCF calculation for dof_0_disp_0...")
@@ -469,7 +508,7 @@ def main():
 
     if args.expbas:
         print("Starting expand basis CASSCF calculation for dof_0_disp_0...")
-        process_expbas_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2, args.start_from_different_lanthanide)
+        process_expbas_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2)
 
     # Prepare the list of dof_disp combinations to process in parallel (excluding dof_0_disp_0)
     xyz_files = glob.glob('dof_*_disp_*.xyz')
@@ -506,7 +545,7 @@ def main():
             print("\nTerminating pool...")
             pool.terminate()
             pool.join()
-            sys.exit(1)
+            raise
     else:
         print('No dof_disp combinations to process.')
 
