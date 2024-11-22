@@ -137,12 +137,12 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
         pattern_type = [[r"SOC and SSC MATRIX \(A\.U\.\)\n"]] if ssc else [[r"SOC MATRIX \(A\.U\.\)\n"]]
         pattern_type += [[r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"], [r"LX MATRIX IN CI BASIS\n", r"LY MATRIX IN CI BASIS\n", r"LZ MATRIX IN CI BASIS\n"]]
         matrix_type = ["STATES_ENERGIES", "SPINS", "ANGULAR_MOMENTA"]
-        descriptions = ["States energies.", "Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :].", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :]."]
+        descriptions = ["States energies (Real Part + Imaginary Part).", "Sx (Real Part), Sy (Imaginary Part) and Sz (Real Part) spin matrices [(x-0, y-1, z-2), :, :].", "Lx (Imaginary Part), Ly (Imaginary Part) and Lz (Imaginary Part) angular momentum matrices [(x-0, y-1, z-2), :, :]."]
 
         if electric_dipole_momenta:
             pattern_type.append([r"Matrix EDX in CI Basis\n", r"Matrix EDY in CI Basis\n", r"Matrix EDZ in CI Basis\n"])
             matrix_type.append("ELECTRIC_DIPOLE_MOMENTA")
-            descriptions.append("Px, Py, and Pz electric dipole momentum [(x-0, y-1, z-2), :, :].")
+            descriptions.append("Px (Imaginary Part), Py (Imaginary Part) and Pz (Imaginary Part) electric dipole momentum [(x-0, y-1, z-2), :, :].")
             
         final_number = (3 if ssc else 1) + (1 if pt2 else 0)
         energy_final_number = 2 if pt2 else 1
@@ -169,7 +169,7 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
                                 if matrix != "ELECTRIC_DIPOLE_MOMENTA":
                                     for _ in range(3):
                                         file.readline() # Skip the first 3 lines if not electric dipole momenta
-                                data = _orca_matrix_reader(so_dim, num_of_whole_blocks, remaining_columns, file)
+                                data = _orca_matrix_reader(so_dim, num_of_whole_blocks, remaining_columns, file) if pattern in [r"SX MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n", r"SOC and SSC MATRIX \(A\.U\.\)\n", r"SOC MATRIX \(A\.U\.\)\n"] else 1j * _orca_matrix_reader(so_dim, num_of_whole_blocks, remaining_columns, file)
                                 if matrix == "STATES_ENERGIES":
                                     for _ in range(2):
                                         file.readline() # Skip 2 lines separating real and imaginary part
