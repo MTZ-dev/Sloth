@@ -1318,7 +1318,7 @@ class SltHamiltonian(metaclass=MethodTypeMeta): # here you can only leave *args 
         return SltZeemanSplitting(self._slt_group, magnetic_fields, orientations, number_of_states, states_cutoff, rotation, electric_field_vector, hyperfine, number_cpu, number_threads, autotune, slt_save)
     
     def magnetisation(self, magnetic_fields: ndarray[Union[float32, float64]], orientations: ndarray[Union[float32, float64]], temperatures: ndarray[Union[float32, float64]], states_cutoff: int = [0, "auto"], rotation: ndarray = None, electric_field_vector: ndarray = None, hyperfine: dict = None, number_cpu: int = None, number_threads: int = None, slt_save: str = None, autotune: bool = False) -> SltMagnetisation:
-        return SltMagnetisation(self, magnetic_fields, orientations, temperatures, states_cutoff, rotation, electric_field_vector, hyperfine, number_cpu, number_threads, autotune, slt_save)
+        return SltMagnetisation(self._slt_group, magnetic_fields, orientations, temperatures, states_cutoff, rotation, electric_field_vector, hyperfine, number_cpu, number_threads, autotune, slt_save)
 
 
 class SltExchangeHamiltonian(SltHamiltonian):
