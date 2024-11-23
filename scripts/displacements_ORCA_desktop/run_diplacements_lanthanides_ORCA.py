@@ -241,7 +241,7 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
     
     rel = "" if expbas_guess else f"""
  rel
-  printlevel 5
+  printlevel 3
   dosoc true
   gtensor true
   NDoubGtensor {NDoubGtensor}
@@ -286,6 +286,7 @@ end
  maxiter 3000
 {rel}
  
+ DoCD false
  DoDipoleLength false
  DoDipoleVelocity false
  DoHigherMoments false
@@ -338,9 +339,9 @@ def cleanup_files(tmp_dir, project_name):
         try:
             output_file = os.path.join(tmp_dir, f'{project_name}.out')
             if os.path.exists(output_file):
-                print(f"Moving {project_name}.out file back to the main directory for inspection. If it is not complete remove or rename it before restarting the calculation!", flush=True)
+                # print(f"Moving {project_name}.out file back to the main directory for inspection. If it is not complete remove or rename it before restarting the calculation!")
                 shutil.move(output_file, f'{project_name}.out')
-            print(f"Clearing the temporary directory {tmp_dir}", flush=True)
+            # print(f"Clearing the temporary directory {tmp_dir}")
             shutil.rmtree(tmp_dir)
         except Exception as e:
             print(f"Error moving .out file or deleting temporary directory {tmp_dir}: {e}")
