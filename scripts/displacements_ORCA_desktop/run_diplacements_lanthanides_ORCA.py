@@ -163,6 +163,8 @@ def generate_input_file_pbe_guess(cpus, max_memory, tmp_dir):
     # Build the BASIS section
     basis_section = build_basis_section(atoms, lanthanide_element)
 
+    xyz_filename = os.path.join('..', f'{project_name}.xyz')
+
     # Build the ORCA input content for the initial PBE calculation
     input_content = f"""! PBE DKH2 DKH-def2-SVP AutoAux RIJCOSX NormalSCF NoFrozenCore SlowConv UNO
 
@@ -190,7 +192,7 @@ end
   end
 end
 
-* xyzfile {charge} {multiplicity} ../{xyz_filename}
+* xyzfile {charge} {multiplicity} {xyz_filename}
 """
 
     with open(input_file, 'w') as f:
@@ -198,7 +200,7 @@ end
 
     return input_filename
 
-def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp_file, tmp_dir, expbas, expbas_guess=False, run_expbas=False):
+def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp_file, tmp_dir, expbas, expbas_guess=False, run_expbas=False, nofrozencore=False):
     # Function to generate the CASSCF input file using the specified %moinp file
     input_filename = f'{project_name}.inp' 
     input_file = os.path.join(tmp_dir, input_filename)
@@ -261,7 +263,7 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
     xyz_filename = os.path.join('..', f'{project_name}.xyz')
 
     # Build the ORCA input content for the CASSCF calculation
-    input_content = f"""! CASSCF DKH2 {"ma-" if expbas else ""}DKH-def2-SVP AutoAux RIJCOSX NoFrozenCore VerySlowConv {"StrongSCF" if expbas_guess else "VeryTightSCF"}
+    input_content = f"""! CASSCF DKH2 {"ma-" if expbas else ""}DKH-def2-SVP AutoAux RIJCOSX {"NoFrozenCore " if nofrozencore else ""}VerySlowConv {"StrongSCF" if expbas_guess else "VeryTightSCF"}
 
 %maxcore {int(max_memory // cpus)}
 
@@ -411,7 +413,7 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_d
             start_file_tmp = start_file
         shutil.copy(start_file,  os.path.join(tmp_dir, start_file_tmp))
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, start_file_tmp, tmp_dir, False, expbas)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, start_file_tmp, tmp_dir, False, expbas, nofrozencore=True)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -443,7 +445,7 @@ def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
         gbw_file_tmp = os.path.join(tmp_dir, 'dof_0_disp_0_guess.gbw')
         shutil.copy(gbw_file, gbw_file_tmp)
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, 'dof_0_disp_0_guess.gbw', tmp_dir, True, run_expbas=True)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, 'dof_0_disp_0_guess.gbw', tmp_dir, True, run_expbas=True, nofrozencore=True)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -462,7 +464,7 @@ def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
 
 def process_dof_disp(args_tuple):
 
-    dof_disp, cpus, max_memory, orca_path, use_nevpt2, expbas = args_tuple
+    dof_disp, cpus, max_memory, orca_path, use_nevpt2, expbas, nofrozencore = args_tuple
     dof_number = dof_disp['dof_number']
     disp_number = dof_disp['disp_number']
     nx = dof_disp.get('nx')
@@ -491,7 +493,7 @@ def process_dof_disp(args_tuple):
         # Copy the .gbw file into the temporary directory
         shutil.copy(gbw_file, tmp_dir)
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, gbw_file, tmp_dir, expbas)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, gbw_file, tmp_dir, expbas, nofrozencore)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -514,6 +516,7 @@ def main():
     parser.add_argument('--use_nevpt2', action='store_true', help='Use NEVPT2 with ptmethod SC_NEVPT2 in the input file.')
     parser.add_argument('--expbas', action='store_true', help='Expand basis to SARC2-DKH-QZVP for the lanthanide ion and ma-DKH-def2-SVP for others up to Kr.')
     parser.add_argument('--start_from_different_lanthanide', action='store_true', help='If a .gbw file is present in the directory the script recalculates the guess assuming that it corresponds to a different lanthanide ion from a previous calculation. The initial .gbw file is being overwritten! (This can also be simply used to recalculate the guess)')
+    parser.add_argument('--nofrozencore', action="store_true', help='Use ORCA's NoFrozenCore option during CASSCF calualtions.")
 
     args = parser.parse_args()
 
@@ -585,7 +588,7 @@ def main():
                 processes = number_of_dof_disp
             cpus_per_process = total_cpus // processes
             memory_per_process = max_memory // processes
-            pool_args = [(dof_disp_list[i], cpus_per_process, memory_per_process, args.orca_path, args.use_nevpt2, args.expbas) for i in range(len(dof_disp_list))]
+            pool_args = [(dof_disp_list[i], cpus_per_process, memory_per_process, args.orca_path, args.use_nevpt2, args.expbas, args.nofrozencore) for i in range(len(dof_disp_list))]
 
             with Pool(processes=processes) as pool:
                 for _ in tqdm(pool.imap_unordered(process_dof_disp, pool_args), total=len(pool_args)):

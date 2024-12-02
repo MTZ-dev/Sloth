@@ -59,7 +59,7 @@ This script automates ORCA calculations of displacement directories created by S
   - You can set the `--expbas` option to further expand the initial basis to SARC2-DKH-QZVP for the lanthanide ion and ma-DKH-def2-SVP for others up to Kr.
 
 - **File Structure:**
-  - The script expects files to be named in the format `dof_X_disp_Y.xyz`, where `X` and `Y` are integers.
+  - The script expects files to be named in the format `dof_X_disp_Y.xyz`, where `X` and `Y` are integers or `dof_X_nx_NX_ny_NY_nz_NZ_disp_Y.xyz` for clusters across multiple unit cells (enumerated by NX, NY , and NZ).
   - Do not rename the generated files unless you also adjust the script accordingly.
 
 ### Resource Management
@@ -70,6 +70,7 @@ This script automates ORCA calculations of displacement directories created by S
   - **Processes (`--processes`):** Number of parallel processes to run (for the displacement calculations).
   - **Maximum Memory (`--max_memory`):** Total memory available for calculations (in MB).
   - **NEVPT2 Option (`--use_nevpt2`):** Include this flag if you want to perform NEVPT2 calculations.
+  - **NoFrozenCore Option (`--nofrozencore`):** Set this flag to use ORCA's NoFrozenCore option during CASSCF calculations.
 
 - **Resource Allocation:**
   - The initial calculations (`dof_0_disp_0_guess` and `dof_0_disp_0`) use all available CPUs.
@@ -192,7 +193,7 @@ python run_displacements_ORCA.py --cpus 64 --processes 4 --orca_path /usr/local/
 ## Example Workflow
 
 1. **Prepare the Working Directory:**
-   - Place all `dof_*_disp_*.xyz` files in the directory.
+   - Place all `dof_*_disp_*.xyz` or `dof_*_nx_*_ny_*_nz_*_disp_*.xyz` files in the directory.
    - Ensure `dof_0_disp_0.xyz` is present.
 
 2. **Adjust Script Settings (if necessary):**
