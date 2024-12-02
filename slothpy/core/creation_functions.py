@@ -354,9 +354,8 @@ def hamiltonian_from_orca(orca_filepath: str, slt_filepath: str, group_name: str
 
     Note
     ----
-    ORCA calculations have to be done with the "gtensor true" and "printlevel 3"
-    (or 5 for dipole momenta) keywords in the "rel" section for outputs to be readable
-    by SlothPy.
+    ORCA calculations have to be done with the "printlevel 4" (or 5 for dipole momenta)
+    keyword in the "rel" section for outputs to be readable by SlothPy.
     """
 
     if not slt_filepath.endswith(".slt"):

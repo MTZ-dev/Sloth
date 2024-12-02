@@ -18,7 +18,7 @@ import inspect
 from functools import wraps
 from os import cpu_count
 from warnings import warn
-from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, linspace, meshgrid, vstack, log, int64, int32, max, min
+from numpy import ndarray, asarray, ascontiguousarray, allclose, identity, linspace, meshgrid, vstack, log, int64, int32, max, min, inf
 from slothpy.core._slothpy_exceptions import SltInputError, SltFileError, SltSaveError, SltWarning, slothpy_exc
 from slothpy._general_utilities._grids_over_hemisphere import lebedev_laikov_grid_over_hemisphere, fibonacci_over_hemisphere, meshgrid_over_hemisphere
 from slothpy._general_utilities._math_expresions import _normalize_grid_vectors, _normalize_orientations, _normalize_orientation
@@ -359,7 +359,14 @@ def validate_input(func):
                             raise ValueError("The central_atom parameter must be an arraylike object of floats.")
                         if value.ndim != 1 or len(value) != 3:
                             raise ValueError("The central_atom parameter must be a 1D array in the form [x, y, z] in Å.")
-
+                    case "distance_cutoff":
+                        try:
+                            if value is not None and value <= 0:
+                                raise ValueError("The given disntance cutoff for finite stencil displacements must be > 0.")
+                            elif value is None:
+                                value = inf
+                        except Exception:
+                            raise ValueError("The given disntance cutoff must be a float.")
 
                 bound_args.arguments[name] = value
                 
@@ -410,7 +417,7 @@ def _parse_hamiltonian_dicts(slt_file, magnetic_centers: dict, exchange_interact
         if value[2] != None:
             value[2] = _parse_rotation(value[2])
         if value[3] != None and (len(value[3]) != 3 or not all(isinstance(x, (int, int32, int64, float)) for x in value[3])):
-            raise ValueError("Coordinates must be None or iterable of length 3 with numerical values in Angstrom [x, y, z].")
+            raise ValueError("Coordinates must be None or iterable of length 3 with numerical values in Å [x, y, z].")
        #TODO: value[4] hyperfine add checks when implemented
 
     if states >= 8000 or (states >= 6000 and exchange_states >= 100):

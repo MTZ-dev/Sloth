@@ -20,6 +20,8 @@
 __pycache__
 .vscode
 .ipynb_checkpoints
+test_*
+proto_*
 test.py
 DG_final.ipynb
 DG_final
@@ -35,7 +37,6 @@ gui
 test_nodes.py
 test_lanczos.py
 perturbation_at_the_end.ipynb
-test_*
 CTM.ipynb
 utmu.pyx
 Er.ipynb

@@ -241,10 +241,10 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
     
     rel = "" if expbas_guess else f"""
  rel
-  printlevel 3
+  printlevel 4
   dosoc true
-  gtensor true
-  NDoubGtensor {NDoubGtensor}
+  # gtensor true
+  # NDoubGtensor {NDoubGtensor}
  end"""
     
     avas = "" if moinp_file.endswith(".gbw") and not run_expbas else f"""AVAS
@@ -257,6 +257,8 @@ def generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, moinp
     center {center_list}
     end
   end"""
+    
+    xyz_filename = os.path.join('..', f'{project_name}.xyz')
 
     # Build the ORCA input content for the CASSCF calculation
     input_content = f"""! CASSCF DKH2 {"ma-" if expbas else ""}DKH-def2-SVP AutoAux RIJCOSX NoFrozenCore VerySlowConv {"StrongSCF" if expbas_guess else "VeryTightSCF"}
@@ -284,6 +286,11 @@ end
  mult {mult_str}
  nroots {nroots_str}
  maxiter 3000
+ printwf det
+ actorbs canonorbs
+ ci
+  TprintWF 0.000000000
+ end
 {rel}
  
  DoCD false
@@ -302,7 +309,7 @@ end
 ! MOREAD
 %moinp "{moinp_file}"
 
-* xyzfile {charge} {multiplicity} ../{xyz_filename}
+* xyzfile {charge} {multiplicity} {xyz_filename}
 """
 
     with open(input_file, 'w') as f:
@@ -397,10 +404,14 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_d
         start_file = f'dof_0_disp_0{start_extension}'
         if not os.path.exists(start_file):
             raise ValueError(f"Required {start_extension} file {start_file} not found. Ensure the initial {".gbw file (from different lanthanide calculation) is in the directory" if start_from_different_lanthanide else "PBE calculation has completed"}.")
-        # Copy the .qro file into the temporary directory
-        shutil.copy(start_file, tmp_dir)
+        # Copy the .qro or .gbw file into the temporary directory
+        if start_file == "dof_0_disp_0.gbw":
+            start_file_tmp = "dof_0_disp_0_guess.gbw"
+        else:
+            start_file_tmp = start_file
+        shutil.copy(start_file,  os.path.join(tmp_dir, start_file_tmp))
 
-        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, start_file, tmp_dir, False, expbas)
+        input_file = generate_input_file_casscf(project_name, cpus, max_memory, use_nevpt2, start_file_tmp, tmp_dir, False, expbas)
         output_file = os.path.join(tmp_dir, f'{project_name}.out')
 
         run_orca(input_file, output_file, orca_path, tmp_dir)
@@ -410,7 +421,7 @@ def process_initial_casscf(cpus, max_memory, orca_path, use_nevpt2, start_from_d
         # Move .gbw file back to the main directory
         gbw_file = os.path.join(tmp_dir, f'{project_name}.gbw')
         if os.path.exists(gbw_file):
-            print("Moving .gbw file back to the main directory...")
+            print("Moving .gbw file back to the main directory, dof_0_disp_0.gbw is being overwritten if present in the main directory!...")
             shutil.move(gbw_file, f'{project_name}.gbw')
         else:
             raise_on_exit = True
@@ -452,8 +463,17 @@ def process_expbas_casscf(cpus, max_memory, orca_path, use_nevpt2):
 def process_dof_disp(args_tuple):
 
     dof_disp, cpus, max_memory, orca_path, use_nevpt2, expbas = args_tuple
-    dof_number, disp_number = dof_disp
-    project_name = f'dof_{dof_number}_disp_{disp_number}'
+    dof_number = dof_disp['dof_number']
+    disp_number = dof_disp['disp_number']
+    nx = dof_disp.get('nx')
+    ny = dof_disp.get('ny')
+    nz = dof_disp.get('nz')
+
+    if nx is not None and ny is not None and nz is not None:
+        project_name = f'dof_{dof_number}_nx_{nx}_ny_{ny}_nz_{nz}_disp_{disp_number}'
+    else:
+        project_name = f'dof_{dof_number}_disp_{disp_number}'
+
     tmp_dir = f'tmp_{project_name}'
     os.makedirs(tmp_dir, exist_ok=True)
 
@@ -478,6 +498,10 @@ def process_dof_disp(args_tuple):
     except Exception:
         raise
     finally:
+        # Move .gbw file back to the main directory
+        gbw_file = os.path.join(tmp_dir, f'{project_name}.gbw')
+        if os.path.exists(gbw_file):
+            shutil.move(gbw_file, f'{project_name}.gbw')
         # Clean up the temporary directory and move the .out file back to the main directory
         cleanup_files(tmp_dir, project_name)
 
@@ -495,49 +519,73 @@ def main():
 
     total_cpus = args.cpus
     processes = args.processes
+    max_memory = args.max_memory
 
     if (args.start_from_different_lanthanide):
         print("Skipping the initial PBE calculation for dof_0_disp_0_guess as restart from different lanthanide's .gbw was requested.")
     else:
         # First, process the initial PBE calculation for dof_0_disp_0_guess using all CPUs
         print("Starting initial PBE calculation for dof_0_disp_0_guess...")
-        process_initial_pbe_guess(total_cpus, args.max_memory, args.orca_path)
+        process_initial_pbe_guess(total_cpus, max_memory, args.orca_path)
 
     # Then, process the CASSCF calculation for dof_0_disp_0 using all CPUs
     print("Starting CASSCF calculation for dof_0_disp_0...")
-    process_initial_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2, args.start_from_different_lanthanide, args.expbas)
+    process_initial_casscf(total_cpus, max_memory, args.orca_path, args.use_nevpt2, args.start_from_different_lanthanide, args.expbas)
 
     if args.expbas:
         print("Starting expand basis CASSCF calculation for dof_0_disp_0...")
-        process_expbas_casscf(total_cpus, args.max_memory, args.orca_path, args.use_nevpt2)
+        process_expbas_casscf(total_cpus, max_memory, args.orca_path, args.use_nevpt2)
 
     # Prepare the list of dof_disp combinations to process in parallel (excluding dof_0_disp_0)
-    xyz_files = glob.glob('dof_*_disp_*.xyz')
-    pattern = re.compile(r'dof_(-?\d+)_disp_(-?\d+)\.xyz')
+    xyz_files = glob.glob('dof_*.xyz')
+    pattern_simple = re.compile(r'dof_(-?\d+)_disp_(-?\d+)\.xyz')
+    pattern_extended = re.compile(r'dof_(-?\d+)_nx_(-?\d+)_ny_(-?\d+)_nz_(-?\d+)_disp_(-?\d+)\.xyz')
 
     dof_disp_list = []
 
     for filename in xyz_files:
-        match = pattern.match(filename)
+        match = pattern_simple.match(filename)
         if match:
             dof_number = int(match.group(1))
             disp_number = int(match.group(2))
+            nx = ny = nz = None
             if dof_number == 0 and disp_number == 0:
                 continue  # Already processed
             project_name = f'dof_{dof_number}_disp_{disp_number}'
-            output_file = f'{project_name}.out'
-            if os.path.exists(output_file):
-                print(f"Skipping {project_name}, calculation already completed.")
-                continue
+
+        else:
+            match = pattern_extended.match(filename)
+            if match:
+                dof_number = int(match.group(1))
+                nx = int(match.group(2))
+                ny = int(match.group(3))
+                nz = int(match.group(4))
+                disp_number = int(match.group(5))
+                if dof_number == 0 and disp_number == 0:
+                    continue  # Already processed
+                project_name = f'dof_{dof_number}_nx_{nx}_ny_{ny}_nz_{nz}_disp_{disp_number}'
             else:
-                dof_disp_list.append((dof_number, disp_number))
+                continue
+
+        output_file = f'{project_name}.out'
+        gbw_file = f'{project_name}.gbw'
+
+        if os.path.exists(output_file) and os.path.exists(gbw_file):
+            print(f"Skipping {project_name}, calculation already completed.")
+            continue
+        else:
+            dof_disp_list.append({"dof_number": dof_number, "disp_number": disp_number, "nx": nx, "ny": ny, "nz": nz})
 
     # Now process the rest in parallel
     if dof_disp_list:
         print('Processing calculations in parallel...')
         try:
+            number_of_dof_disp = len(dof_disp_list)
+            if processes > number_of_dof_disp:
+                processes = number_of_dof_disp
             cpus_per_process = total_cpus // processes
-            pool_args = [((dof_disp_list[i]), cpus_per_process, args.max_memory, args.orca_path, args.use_nevpt2, args.expbas) for i in range(len(dof_disp_list))]
+            memory_per_process = max_memory // processes
+            pool_args = [(dof_disp_list[i], cpus_per_process, memory_per_process, args.orca_path, args.use_nevpt2, args.expbas) for i in range(len(dof_disp_list))]
 
             with Pool(processes=processes) as pool:
                 for _ in tqdm(pool.imap_unordered(process_dof_disp, pool_args), total=len(pool_args)):

@@ -23,7 +23,7 @@ from os import makedirs, remove
 from os.path import join, exists
 
 from h5py import File, Group, Dataset, string_dtype
-from numpy import ndarray, asarray, asfortranarray, empty, real, linspace, outer, repeat, tensordot, diag, meshgrid, stack, arange, tensordot, einsum, all, where, float32, float64,  abs,  conjugate, sqrt, exp, pi, newaxis
+from numpy import ndarray, asarray, asfortranarray, empty, real, linspace, outer, repeat, tensordot, diag, meshgrid, stack, arange, tensordot, einsum, all, where, round, float32, float64, int64, abs, conjugate, sqrt, exp, pi, newaxis
 from numpy.exceptions import ComplexWarning
 from numpy.linalg import norm, inv
 warnings.filterwarnings("ignore", category=ComplexWarning)
@@ -533,7 +533,7 @@ class SltGroup(metaclass=MethodDelegateMeta):
         displacement_number : int
             Number of displacement steps in each direction (negative and positive).
         step : float
-            Magnitude of each displacement step in Angstroms.
+            Magnitude of each displacement step in Å.
         output_option : str, optional
             Specifies the output mode. Options:
             - 'xyz': Write displaced structures as `.xyz files`.
@@ -555,16 +555,16 @@ class SltGroup(metaclass=MethodDelegateMeta):
         """
         pass
     
-    def generate_finite_stencil_displacements_reduced_to_unit_cell(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
+    def generate_finite_stencil_displacements_reduced_to_unit_cell(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, distance_cutoff: Optional[float] = None, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
         """
         Generates finite stencil displacements reduced to the unit cell for derivative
         calculations.
 
-        This method identifies unique atoms in a cluster that correspond to atoms in
-        the given unit cell, based on periodic boundary conditions and the closeness
-        to the central atom. It then displaces only these unique atoms along the
-        x, y, and z axes in both negative and positive directions by a specified number
-        of steps and step size.
+        This method identifies unique atoms in a cluster (up to the cutoff distance
+        from the central atom) that correspond to atoms in the given unit cell, based
+        on periodic boundary conditions and the closeness to the central atom. It then
+        displaces only these unique atoms along the x, y, and z axes in both negative
+        and positive directions by a specified number of steps and step size.
 
         Parameters:
         ----------
@@ -577,7 +577,10 @@ class SltGroup(metaclass=MethodDelegateMeta):
         displacement_number : int
             Number of displacement steps in each direction (negative and positive).
         step : float
-            Magnitude of each displacement step in Angstroms.
+            Magnitude of each displacement step in Å.
+        distance_cutoff: float, optional
+            Specifies distance radius (in Å) from the given central atom (or point) above
+            which all atoms will be disregarded in the displacement generation.
         output_option : str, optional
             Specifies the output mode. Options:
             - 'xyz': Write displaced structures as `.xyz` files.
@@ -599,6 +602,55 @@ class SltGroup(metaclass=MethodDelegateMeta):
         """
         pass
     
+    def generate_finite_stencil_displacements_across_unit_cells(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, distance_cutoff: Optional[float] = None, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
+        """
+        Generates finite stencil displacements across unit cells for derivative
+        calculations.
+
+        This method identifies all atoms in a cluster (up to the cutoff distance from
+        the central atom) with corresponding atoms in the given unit cells. Then based
+        on periodic boundary conditions different unit cells are enumerated with nx, ny
+        and nz with respect to the central atom's unit cell (0,0,0). It then displaces
+        atoms along the x, y, and z axes in both negative and positive directions by a
+        specified number of steps and step size.
+
+        Parameters:
+        ----------
+        unit_cell_group_name : str
+            Name of the `SltGroup` representing the unit cell to which the cluster
+            corresponds.
+        central_atom : ndarray[Union[float32, float64]]
+            Coordinates of the central atom in the cluster used as for locating
+            the reference nx_ny_nz = (0,0,0) unit cell.
+        displacement_number : int
+            Number of displacement steps in each direction (negative and positive).
+        step : float
+            Magnitude of each displacement step in Å.
+        distance_cutoff: float, optional
+            Specifies distance radius (in Å) from the given central atom above
+            which all atoms will be disregarded in the displacement generation.
+        output_option : str, optional
+            Specifies the output mode. Options:
+            - 'xyz': Write displaced structures as `.xyz` files.
+            - 'iterator': Return an iterator yielding tuples of displaced ASE `Atoms`
+            objects, degree of freedom (DOF) numbers, nx, ny, nz and displacement
+            numbers.
+            - 'slt': Dump all displaced structures into the `.slt` file.
+            Default is 'xyz'.
+        custom_directory : str, optional
+            Directory path to save `.xyz` files. Required if `output_option` is 'xyz'.
+        slt_group_name : str, optional
+            Name of the `SltGroup` to store displaced structures. Required if
+            `output_option` is 'slt'.
+
+        Returns:
+        -------
+        Iterator[Atoms] or None
+            Returns an iterator of ASE `Atoms` objects if `output_option` is 'iterator'.
+            Otherwise, returns `None`.
+        """
+        pass
+
     def supercell(self, nx: int, ny: int, nz: int, output_option: Literal["xyz", "slt"] = "xyz", xyz_filepath: Optional[str] = None, slt_group_name: Optional[str] = None) -> SltGroup:
         """
         Generates a supercell by repeating the unit cell along x, y, and z axes.
@@ -650,7 +702,7 @@ class SltGroup(metaclass=MethodDelegateMeta):
         displacement_number : int
             Number of displacement steps in each direction (negative and positive).
         step : float
-            Magnitude of each displacement step in Angstroms.
+            Magnitude of each displacement step in Å.
         output_option : str, optional
             Specifies the output mode. Options:
             - 'xyz': Write displaced structures as .xyz files.
@@ -705,7 +757,7 @@ class SltGroup(metaclass=MethodDelegateMeta):
             Number of displacement steps in each direction used in the finite
             difference stencil.
         step : float
-            Magnitude of each displacement step in Angstroms.
+            Magnitude of each displacement step in Å.
         acoustic_sum_rule : str, optional
             Method to enforce the acoustic sum rule on the Hessian matrix. Options
             are:
@@ -1461,7 +1513,7 @@ class SltExchangeHamiltonian(SltHamiltonian):
                 r_vec = self._magnetic_centers[key1][3] - self._magnetic_centers[key2][3]
                 r_norm = norm(r_vec)
                 if r_norm <= 1e-2:
-                    raise ValueError("Magnetic centers are closer than 0.01 Angstrom. Please double-check the SlothPy Hamiltonian dictionary. Quitting here.")
+                    raise ValueError("Magnetic centers are closer than 0.01 Å. Please double-check the SlothPy Hamiltonian dictionary. Quitting here.")
                 coeff = coeff / r_norm ** 3
                 r_vec = r_vec / r_norm
                 op1 = tensordot(dipole_momenta_dict[key1], - 3. * coeff * r_vec ,axes=(0, 0))
@@ -1603,7 +1655,7 @@ class SltXyz(metaclass=MethodTypeMeta):
         if output_option == 'xyz':
             for displacement_info in displacement_generator():
                 displaced_atoms, dof, multiplier = displacement_info[0], displacement_info[1], displacement_info[2]
-                xyz_file_name = f"dof_{dof}_disp_{multiplier}.xyz"
+                xyz_file_name = f"dof_{dof[0]}_nx_{dof[1]}_ny_{dof[2]}_nz_{dof[3]}_disp_{multiplier}.xyz" if isinstance(dof, tuple) else f"dof_{dof}_disp_{multiplier}.xyz"
                 xyz_file_path = join(custom_directory, xyz_file_name)
                 try:
                     additional_info = f"Step: {step} Displacement_Number: {displacement_number} "
@@ -1636,13 +1688,13 @@ class SltXyz(metaclass=MethodTypeMeta):
                         displacement_group.attrs["Supercell_Repetitions"] = [_nx, _ny, _nz]
                 for displacement_info in displacement_generator():
                     displaced_atoms, dof, multiplier = displacement_info[0], displacement_info[1], displacement_info[2]
-                    subgroup_name = f"{slt_group_name}/dof_{dof}_disp_{multiplier}"
+                    subgroup_name = f"{slt_group_name}/dof_{dof}_nx_{dof[1]}_ny_{dof[2]}_nz_{dof[3]}_disp_{multiplier}" if isinstance(dof, tuple) else f"{slt_group_name}/dof_{dof}_disp_{multiplier}"
                     _xyz_to_slt(self._slt_group._hdf5, subgroup_name, displaced_atoms.get_chemical_symbols(), displaced_atoms.get_positions(), self._charge, self._multiplicity)
             except Exception as exc:
                 raise SltFileError(self._slt_group._hdf5, exc, f"Failed to write displacement Group '{slt_group_name}' to the .slt file") from None
             return SltGroup(self._slt_group._hdf5, slt_group_name)
 
-    def generate_finite_stencil_displacements_reduced_to_unit_cell(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
+    def generate_finite_stencil_displacements_reduced_to_unit_cell(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, distance_cutoff: Optional[float] = None, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
         xyz_atoms_postions = self.atoms_object().get_positions()
         unit_cell = SltGroup(self._slt_group._hdf5, unit_cell_group_name).atoms_object
         unit_cell_atom_postions = unit_cell.get_positions()
@@ -1662,12 +1714,49 @@ class SltXyz(metaclass=MethodTypeMeta):
         dof_dict = {}
 
         for (distance, atom_xyz, atom_unit_cell) in match_candidates:
+            if distance > distance_cutoff:
+                break
             if atom_xyz not in assigned_atoms_xyz and atom_unit_cell not in assigned_atoms_unit_cell:
                 dof_dict[3 * atom_xyz] = 3 * atom_unit_cell
                 dof_dict[3 * atom_xyz + 1] = 3 * atom_unit_cell + 1
                 dof_dict[3 * atom_xyz + 2] = 3 * atom_unit_cell + 2
                 assigned_atoms_xyz.add(atom_xyz)
                 assigned_atoms_unit_cell.add(atom_unit_cell)
+
+        return self.generate_finite_stencil_displacements(displacement_number, step, output_option, custom_directory, slt_group_name, _dof_dict=dof_dict)
+    
+    def generate_finite_stencil_displacements_across_unit_cells(self, unit_cell_group_name: str, central_atom: ndarray[Union[float32, float64]], displacement_number: int, step: float, distance_cutoff: Optional[float] = None, output_option: Literal["xyz", "iterator", "slt"] = "xyz", custom_directory: Optional[str] = None, slt_group_name: Optional[str] = None) -> Optional[Iterator[Atoms]]:
+        xyz_atoms_postions = self.atoms_object().get_positions()
+        unit_cell = SltGroup(self._slt_group._hdf5, unit_cell_group_name).atoms_object
+        unit_cell_atom_postions = unit_cell.get_positions()
+        cell_vectors = unit_cell.get_cell()
+
+        distances = norm(xyz_atoms_postions - central_atom, axis=1)
+        difference = unit_cell_atom_postions[newaxis, :, :] - xyz_atoms_postions[:, newaxis, :]
+        n_vectors = einsum('ijk,kl->ijl', difference, inv(cell_vectors))
+        check_vectors = is_approximately_integer(n_vectors, 0.005)
+        matching_indices = where(all(check_vectors, axis=2))
+        match_candidates = list(zip(distances[matching_indices[0]], matching_indices[0], matching_indices[1], n_vectors[matching_indices[0], matching_indices[1], :]))
+        match_candidates.sort()
+
+        n_central_atom = match_candidates[0][3]
+        if not all(abs(match_candidates[0][0]) < 0.001):
+            raise RuntimeError(f"A central atom with the given coordinates ({central_atom}) could not be located in the cluster for finite displacements generation.")
+        n_central_atom = round(n_central_atom).astype(int64)
+
+        assigned_atoms_xyz = set()
+
+        dof_dict = {}
+
+        for (distance, atom_xyz, atom_unit_cell, n_vector) in match_candidates:
+            if distance > distance_cutoff:
+                break
+            if atom_xyz not in assigned_atoms_xyz:
+                n_vector = round(n_vector).astype(int64) - n_central_atom
+                dof_dict[3 * atom_xyz] = (3 * atom_unit_cell, n_vector[0], n_vector[1], n_vector[2])
+                dof_dict[3 * atom_xyz + 1] = (3 * atom_unit_cell + 1, n_vector[0], n_vector[1], n_vector[2])
+                dof_dict[3 * atom_xyz + 2] = (3 * atom_unit_cell + 2, n_vector[0], n_vector[1], n_vector[2])
+                assigned_atoms_xyz.add(atom_xyz)
 
         return self.generate_finite_stencil_displacements(displacement_number, step, output_option, custom_directory, slt_group_name, _dof_dict=dof_dict)
 
