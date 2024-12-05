@@ -516,7 +516,7 @@ def main():
     parser.add_argument('--use_nevpt2', action='store_true', help='Use NEVPT2 with ptmethod SC_NEVPT2 in the input file.')
     parser.add_argument('--expbas', action='store_true', help='Expand basis to SARC2-DKH-QZVP for the lanthanide ion and ma-DKH-def2-SVP for others up to Kr.')
     parser.add_argument('--start_from_different_lanthanide', action='store_true', help='If a .gbw file is present in the directory the script recalculates the guess assuming that it corresponds to a different lanthanide ion from a previous calculation. The initial .gbw file is being overwritten! (This can also be simply used to recalculate the guess)')
-    parser.add_argument('--nofrozencore', action="store_true', help='Use ORCA's NoFrozenCore option during CASSCF calualtions.")
+    parser.add_argument('--nofrozencore', action='store_true', help="Use ORCA's NoFrozenCore option during CASSCF calualtions.")
 
     args = parser.parse_args()
 

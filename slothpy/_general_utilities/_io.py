@@ -14,12 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Literal
+from typing import Literal, Iterator
 from os.path import join
-from re import compile, search, findall
+from re import compile, search, findall, sub, MULTILINE, IGNORECASE
 
 from h5py import File, string_dtype
-from numpy import ndarray, dtype, bytes_, asarray, zeros, empty, loadtxt, sum, reshape, mean, arange, transpose, min
+from numpy import ndarray, dtype, bytes_, asarray, zeros, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, min, int64, diag
 from scipy.linalg import eigh
 
 from slothpy.core._slothpy_exceptions import SltReadError
@@ -113,10 +113,11 @@ def _supercell_to_slt(slt_filepath, group_name, elements, positions, cell, nx, n
         group.attrs["Supercell_Repetitions"] = [nx, ny, nz]
 
 
-def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool) -> None:
-    
+def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, ci_basis: bool) -> None:
+    dtype = settings.complex
+
     # Retrieve dimensions and block sizes for spin-orbit calculations
-    (so_dim, num_of_whole_blocks, remaining_columns) = _get_orca_blocks_size(orca_filepath)
+    (dim, num_of_whole_blocks, remaining_columns) = _get_orca_blocks_size(orca_filepath)
     
     # Create HDF5 file and ORCA group
     with File(f"{slt_filepath}", "a") as slt:
@@ -124,11 +125,15 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
         group.attrs["Type"] = "HAMILTONIAN"
         group.attrs["Kind"] = "ORCA"
         group.attrs["Precision"] = settings.precision.upper()
-        group.attrs["States"] = so_dim
+        group.attrs["States"] = dim
         if ssc:
-            group.attrs["Energies_type"] = "SSC"
+            group.attrs["Hamiltonian_type"] = "SOC_SSC"
         else:
-            group.attrs["Energies_type"] = "SOC" 
+            group.attrs["Hamiltonian_type"] = "SOC"
+        if ci_basis:
+            group.attrs["Basis"] = "CI"
+        else:
+            group.attrs["Basis"] = "DIAGONAL"
         if electric_dipole_momenta:
             group.attrs["Additional"] = "ELECTRIC_DIPOLE_MOMENTA"
         group.attrs["Description"] = "Relativistic ORCA results."
@@ -136,55 +141,68 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
         # Extract and process matrices
         pattern_type = [[r"SOC and SSC MATRIX \(A\.U\.\)\n"]] if ssc else [[r"SOC MATRIX \(A\.U\.\)\n"]]
         pattern_type += [[r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"], [r"LX MATRIX IN CI BASIS\n", r"LY MATRIX IN CI BASIS\n", r"LZ MATRIX IN CI BASIS\n"]]
-        matrix_type = ["STATES_ENERGIES", "SPINS", "ANGULAR_MOMENTA"]
-        descriptions = ["States energies.", "Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :].", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :]."]
-
+            
+        if ci_basis:
+            matrix_types = ["SOC_SSC_MATRIX"] if ssc else ["SOC_MATRIX"]
+            descriptions = [f"SOC {"and SSC " if ssc else ""}matrix in CI basis."]
+            descriptions += ["Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :] in CI basis.", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :] in CI basis."]
+        else:
+            matrix_types = ["STATES_ENERGIES"]
+            descriptions = ["States energies.", "Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :].", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :]."]
+        
+        matrix_types += ["SPINS", "ANGULAR_MOMENTA"]
+        
         if electric_dipole_momenta:
             pattern_type.append([r"Matrix EDX in CI Basis\n", r"Matrix EDY in CI Basis\n", r"Matrix EDZ in CI Basis\n"])
-            matrix_type.append("ELECTRIC_DIPOLE_MOMENTA")
-            descriptions.append("Px, Py, and Pz electric dipole momentum [(x-0, y-1, z-2), :, :].")
-            
-        final_number = (3 if ssc else 1) + (1 if pt2 else 0)
-        energy_final_number = 2 if pt2 else 1
+            matrix_types.append("ELECTRIC_DIPOLE_MOMENTA")
+            descriptions.append(f"Px, Py, and Pz electric dipole momentum [(x-0, y-1, z-2), :, :]{" in CI basis" if ci_basis else ""}.")
 
-        for matrix, patterns, description in zip(matrix_type, pattern_type, descriptions):
-            if matrix == "STATES_ENERGIES":
-                dataset = group.create_dataset(f"{matrix}", shape = so_dim, dtype = settings.float, chunks = True)
-            else:
-                dataset = group.create_dataset(f"{matrix}", shape = (3, so_dim, so_dim), dtype = settings.complex, chunks = True)
-            
-            dataset.attrs["Description"] = description
+        energy_number = 2 if pt2 else 1
 
-            for index, pattern in enumerate(patterns):
-                regex = compile(pattern)
-          
-                with open(f"{orca_filepath}", "r") as file:
-                    matrix_number = 0
-                    for line in file:
+        with open(f"{orca_filepath}", "r") as file:
+            energy_block_flag = True
+            matrix_number = 0
+            for matrix_type, patterns, description in zip(matrix_types, pattern_type, descriptions):
+                if not energy_block_flag:
+                    data = empty((3, dim, dim), dtype=settings.complex, order='C')
+                for index, pattern in enumerate(patterns):
+                    regex = compile(pattern)
+                    while True:
+                        line = next(file)
                         if regex.search(line):
-                            matrix_number += 1
-                            if matrix == "STATES_ENERGIES":
-                                final_number =  energy_final_number  
-                            if matrix_number == final_number:
-                                if matrix != "ELECTRIC_DIPOLE_MOMENTA":
+                            if energy_block_flag:
+                                matrix_number += 1
+                            if matrix_number == energy_number:
+                                if energy_block_flag:
                                     for _ in range(3):
-                                        file.readline() # Skip the first 3 lines if not electric dipole momenta
-                                data = _orca_matrix_reader(so_dim, num_of_whole_blocks, remaining_columns, file)
-                                if pattern not in [r"SX MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n", r"SOC and SSC MATRIX \(A\.U\.\)\n", r"SOC MATRIX \(A\.U\.\)\n"]:
-                                    data = 1j*data
-                                if pattern in [r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"]:
-                                    data *= 0.5
-                                if matrix == "STATES_ENERGIES":
+                                        next(file) # Skip 3 the first 3 lines if not electric dipole momenta
+                                    data_real = _orca_matrix_reader(dim, num_of_whole_blocks, remaining_columns, file, dtype, True)
                                     for _ in range(2):
-                                        file.readline() # Skip 2 lines separating real and imaginary part
-                                    data_imag = _orca_matrix_reader(so_dim, num_of_whole_blocks, remaining_columns, file)
-                                    energy_matrix = asarray(data + 1j * data_imag, dtype=settings.complex, order="C")
-                                    energies, eigenvectors = eigh(energy_matrix, driver="evr", check_finite=False, overwrite_a=True, overwrite_b=True)
-                                    dataset[:] = energies - min(energies)  # Assign energies to the dataset
+                                        next(file) # Skip 2 lines separating real and imaginary part
+                                    data_imag = _orca_matrix_reader(dim, num_of_whole_blocks, remaining_columns, file, dtype, True)
+                                    data = data_real + 1j * data_imag
+                                    if not ci_basis:
+                                        energies, eigenvectors = eigh(data, driver="evr", check_finite=False, overwrite_a=True, overwrite_b=True)
+                                        data = energies - min(energies)  # Assign energies to the dataset
+                                    energy_block_flag = False
+                                    break
+                                if matrix_type != "ELECTRIC_DIPOLE_MOMENTA":
+                                    for _ in range(3):
+                                        next(file) # Skip the first 3 lines if not electric dipole momenta
+                                matrix = _orca_matrix_reader(dim, num_of_whole_blocks, remaining_columns, file, dtype)
+                                if pattern not in [r"SX MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"]:
+                                    matrix = 1j*matrix
+                                if pattern in [r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"]:
+                                    matrix = matrix*(0.5 + 0j)
+                                if ci_basis:
+                                    data[index] = matrix
                                 else:
-                                    transformed_data = (eigenvectors.conj().T @ data @ eigenvectors)
-                                    dataset[index] = transformed_data[:] # Assign transformed matrix
+                                    transformed_data = (eigenvectors.conj().T @ matrix @ eigenvectors)
+                                    data[index] = transformed_data # Assign transformed matrix
                                 break
+
+                dataset = group.create_dataset(f"{matrix_type}", data=data, chunks = True)
+                dataset.attrs["Description"] = description
 
 
 def _molcas_to_slt(molcas_filepath: str, slt_filepath: str, group_name: str, electric_dipole_momenta: bool = False) -> None:
@@ -197,27 +215,27 @@ def _molcas_to_slt(molcas_filepath: str, slt_filepath: str, group_name: str, ele
             group.attrs["Type"] = "HAMILTONIAN"
             group.attrs["Kind"] = "MOLCAS"
             group.attrs["Precision"] = settings.precision.upper()
-            group.attrs["Energies_type"] = "SOC"
+            group.attrs["Hamiltonian_type"] = "SOC"
             if electric_dipole_momenta:
                 group.attrs["Additional"] = "ELECTRIC_DIPOLE_MOMENTA"
             group.attrs["Description"] = "Relativistic MOLCAS results."
 
             dataset_rassi = rassi["SOS_ENERGIES"][:] - min(rassi["SOS_ENERGIES"][:])
             group.attrs["States"] = dataset_rassi.shape[0]
-            dataset_out = group.create_dataset("STATES_ENERGIES", shape=dataset_rassi.shape, dtype=settings.float, data=dataset_rassi.astype(settings.float), chunks=True)
+            dataset_out = group.create_dataset("STATES_ENERGIES", data=dataset_rassi.astype(settings.float), chunks=True)
             dataset_out.attrs["Description"] = "SOC energies."
 
             dataset_rassi = rassi["SOS_SPIN_REAL"][:, :, :] + 1j * rassi["SOS_SPIN_IMAG"][:, :, :]
-            dataset_out = group.create_dataset("SPINS", shape=dataset_rassi.shape, dtype=settings.complex, data=dataset_rassi.astype(settings.complex), chunks=True)
+            dataset_out = group.create_dataset("SPINS", data=dataset_rassi.astype(settings.complex), chunks=True)
             dataset_out.attrs["Description"] = "Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :]."
 
             dataset_rassi = 1j * rassi["SOS_ANGMOM_REAL"][:, :, :] - rassi["SOS_ANGMOM_IMAG"][:, :, :]
-            dataset_out = group.create_dataset("ANGULAR_MOMENTA", shape=dataset_rassi.shape, dtype=settings.complex, data=dataset_rassi.astype(settings.complex), chunks=True)
+            dataset_out = group.create_dataset("ANGULAR_MOMENTA", data=dataset_rassi.astype(settings.complex), chunks=True)
             dataset_out.attrs["Description"] = "Lx, Ly, and, Lz angular momentum matrices [(x-0, y-1, z-2), :, :]."
 
             if electric_dipole_momenta:
                 dataset_rassi = rassi["SOS_EDIPMOM_REAL"][:, :, :] + 1j * rassi["SOS_EDIPMOM_REAL"][:, :, :]
-                dataset_out = group.create_dataset("ELECTRIC_DIPOLE_MOMENTA", shape=dataset_rassi.shape, dtype=settings.complex, data=dataset_rassi.astype(settings.complex), chunks=True)
+                dataset_out = group.create_dataset("ELECTRIC_DIPOLE_MOMENTA", data=dataset_rassi.astype(settings.complex), chunks=True)
                 dataset_out.attrs["Description"] = "Px, Py, and Pz electric dipole momentum matrices [(x-0, y-1, z-2), :, :]."
 
 
@@ -255,6 +273,39 @@ def _exchange_hamiltonian_to_slt(slt_filepath: str, group_name: str, states: int
         save_dict_to_group(group, exchange_interactions, "EXCHANGE_INTERACTIONS")
 
 
+def _orca_fragovl_to_slt(orca_fragovl_filepath: str, slt_filepath: str, group_name: str, dim: int) -> None:
+    dtype = settings.float
+    number_of_whole_blocks = dim // 6
+    remaining_columns = dim % 6
+
+    with File(f"{slt_filepath}", "a") as slt:
+        group = slt.create_group(group_name)
+        group.attrs["Type"] = "FRAGMENT_FRAMGENT_MO_OVERLAP"
+        group.attrs["Kind"] = "ORCA"
+        group.attrs["Precision"] = settings.precision.upper()
+        group.attrs["States"] = dim
+
+        with open(f"{orca_fragovl_filepath}", "r") as file:
+            for _ in range(9):
+                next(file)
+            fragment_fragment_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+
+            for _ in range(5):
+                next(file)
+            fragment_A_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+
+            for _ in range(5):
+                next(file)
+            fragment_B_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+
+            print(max(diag(fragment_fragment_matrix)))
+
+        fragment_fragment_MO_overlap_matrix = fragment_A_MO_matrix @ fragment_fragment_matrix @ fragment_B_MO_matrix.T
+        
+        group.create_dataset("MO_OVERLAP", data=fragment_fragment_MO_overlap_matrix, chunks=True)
+
+
+
 def _create_dataset(group, name, data):
     if data is None:
         data=bytes_('None')
@@ -288,50 +339,99 @@ def save_dict_to_group(group, data_dict, subgroup_name):
 
 
 def _get_orca_blocks_size(orca_filepath: str) -> tuple[int, int, int]:
-    
-    with open(orca_filepath, "r") as file:
-        regex = compile(r"SOC MATRIX \(A\.U\.\)\n")
-        so_dim = -1
+
+    casscf_section = False
+    input_section = False
+
+    input_file_start_re = compile(r'^\s*INPUT FILE')
+    input_file_end_re = compile(r'^\s*\*{4}END OF INPUT\*{4}')
+    casscf_start_re = compile(r'^\s*\|\s*\d+>\s*%casscf', IGNORECASE)
+    casscf_end_re = compile(r'^\s*\|\s*\d+>\s*end', IGNORECASE)
+    mult_re = compile(r'^\s*\|\s*\d+>\s*mult\s+(.*)', IGNORECASE)
+    nroots_re = compile(r'^\s*\|\s*\d+>\s*nroots\s+(.*)', IGNORECASE)
+
+    found_mult = False
+    found_nroots = False
+
+    with open(orca_filepath, 'r') as file:
         for line in file:
-            if regex.search(line):
-                for _ in range(4):
-                    file.readline()
-                for line in file:
-                    elements = findall(r'[-+]?\d*\.\d+|[+-]?\d+', line)
-                    so_dim += 1
-                    if len(elements) == 6:
-                        break
-                break
+            if input_file_start_re.match(line):
+                input_section = True
+                continue
+            elif input_file_end_re.match(line):
+                input_section = False
+                continue
 
-    num_blocks = so_dim // 6
-    num_of_whole_blocks = num_blocks
-    remaining_columns = so_dim % 6
+            if input_section:
+                if casscf_start_re.match(line):
+                    casscf_section = True
+                    continue
+                elif casscf_end_re.match(line) and casscf_section:
+                    casscf_section = False
+                    continue
 
-    if remaining_columns != 0:
-        num_blocks += 1 
+                if casscf_section:
+                    if not found_mult:
+                        mult_match = mult_re.match(line)
+                        if mult_match:
+                            mult_values = mult_match.group(1)
+                            multiplicities = asarray(list(map(int, findall(r'\d+', mult_values))), dtype=int64)
+                            found_mult = True
+                            if found_nroots:
+                                break
+                            continue
 
-    return so_dim, num_of_whole_blocks, remaining_columns
+                    if not found_nroots:
+                        nroots_match = nroots_re.match(line)
+                        if nroots_match:
+                            nroots_values = nroots_match.group(1)
+                            nroots = asarray(list(map(int, findall(r'\d+', nroots_values))), dtype=int64)
+                            found_nroots = True
+                            if found_mult:
+                                break
+                            continue
+    
+    dim = sum(multiplicities * nroots)
+    number_of_whole_blocks = dim // 6
+    remaining_columns = dim % 6
+
+    return dim, number_of_whole_blocks, remaining_columns
 
 
-def _orca_matrix_reader(so_dim: int, num_of_whole_blocks: int, remaining_columns: int, file) -> ndarray:
-    matrix = empty((so_dim, so_dim), dtype=settings.float, order="C")
+def _orca_matrix_reader(dim: int, number_of_whole_blocks: int, remaining_columns: int, file: Iterator, dtype: dtype, fix: bool = False) -> ndarray:
+    matrix = empty((dim, dim), dtype=dtype, order="C")
     l = 0
-    for _ in range(num_of_whole_blocks):
-        file.readline()  # Skip a line before each block of 6 columns
-        for i in range(so_dim):
-            line = file.readline()
-            elements = findall(r'[-+]?\d*\.\d+', line)
-            for j in range(6):       
-                matrix[i, l + j] = settings.float((elements[j]))
+
+    remove_indices_pattern = compile(r'^\s*\d+\s*', MULTILINE)
+    fix_negative_overlap_pattern = compile(r'(\d)(-)')
+
+    for _ in range(number_of_whole_blocks):
+        next(file)  # Skip a line before each block
+
+        # Read all lines for the current block at once
+        data_str = ''.join([next(file) for _ in range(dim)])
+
+        # Remove leading row indices
+        data_str = remove_indices_pattern.sub('', data_str)
+
+        if fix:
+            # Insert spaces where negative signs overlap previous numbers
+            data_str = fix_negative_overlap_pattern.sub(r'\1 -', data_str)
+
+        data = fromstring(data_str, sep=' ', dtype=dtype)
+        data = data.reshape(dim, 6)
+        matrix[:, l:l+6] = data
         l += 6
-        
+
     if remaining_columns > 0:
-        file.readline()  # Skip a line before the remaining columns
-        for i in range(so_dim):
-            line = file.readline()
-            elements = findall(r'[-+]?\d*\.\d+', line)
-            for j in range(remaining_columns):
-                matrix[i, l + j] = settings.float(elements[j])
+        next(file)
+        data_str = ''.join([next(file) for _ in range(dim)])
+        data_str = remove_indices_pattern.sub('', data_str)
+        if fix:
+            data_str = fix_negative_overlap_pattern.sub(r'\1 -', data_str)
+        data = fromstring(data_str, sep=' ', dtype=dtype)
+        data = data.reshape(dim, remaining_columns)
+        matrix[:, l:l+remaining_columns] = data
 
     return matrix
 

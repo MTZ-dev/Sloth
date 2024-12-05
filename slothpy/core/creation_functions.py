@@ -364,7 +364,7 @@ def hamiltonian_from_orca(orca_filepath: str, slt_filepath: str, group_name: str
     if not isinstance(group_name, str):
         raise SltInputError(f"The group name has to be a string not {type(group_name)}.")
     try:
-        _orca_to_slt(orca_filepath, slt_filepath, group_name, pt2, electric_dipole_momenta, ssc)
+        _orca_to_slt(orca_filepath, slt_filepath, group_name, pt2, electric_dipole_momenta, ssc, False)
 
         return SltFile._new(slt_filepath)
 
