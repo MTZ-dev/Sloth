@@ -19,7 +19,7 @@ from typing import Literal
 from numpy import ndarray, finfo, empty, where, abs, sqrt, float64, float32, complex64, complex128
 
 from slothpy.core._system import SharedMemoryArrayInfo, _load_shared_memory_arrays
-from slothpy._general_utilities._numba_methods import _dynamical_matrix
+from slothpy._general_utilities._numba_methods import _build_dynamical_matrix
 
 class Hessian():
     
@@ -51,14 +51,14 @@ class Hessian():
             self._dtype_array = empty(1, dtype=complex128)
 
     @property
-    def build_dynamical_matrix(self):
-        return _dynamical_matrix(self._hessian, self._masses_inv_sqrt, self._kpoint, self._dtype_array).T
+    def dynamical_matrix(self):
+        return _build_dynamical_matrix(self._hessian, self._masses_inv_sqrt, self._kpoint, self._dtype_array).T
 
     @property
     def frequencies(self):
         if self._lwork is None:
             self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='N', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
-        frequencies_squared = self._heevr(self.build_dynamical_matrix, *self._lwork, jobz='N', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
+        frequencies_squared = self._heevr(self.dynamical_matrix, *self._lwork, jobz='N', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
 
         return where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared)))
 
@@ -66,7 +66,7 @@ class Hessian():
     def frequencies_eigenvectors(self):
         if self._lwork is None:
             self._lwork = self._heevr_lwork(self._masses_inv_sqrt.shape[0], jobz='V', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
-        frequencies_squared, eigenvectors = self._heevr(self.build_dynamical_matrix, *self._lwork, jobz='V', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
+        frequencies_squared, eigenvectors = self._heevr(self.dynamical_matrix, *self._lwork, jobz='V', range=self._range, il=self._il, iu=self._iu, vl=self._vl, vu=self._vu)
 
         return where(frequencies_squared >= 0, sqrt(abs(frequencies_squared)), -sqrt(abs(frequencies_squared))), eigenvectors
     

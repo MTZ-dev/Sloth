@@ -14,9 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Literal, Iterator
-from os.path import join
-from re import compile, search, findall, sub, MULTILINE, IGNORECASE
+from typing import Union, Literal, Iterator
+from os.path import join, exists
+from glob import glob
+from re import compile, search, findall, MULTILINE, IGNORECASE
+from collections import defaultdict
 
 from h5py import File, string_dtype
 from numpy import ndarray, dtype, bytes_, asarray, zeros, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, min, int64, diag
@@ -113,55 +115,74 @@ def _supercell_to_slt(slt_filepath, group_name, elements, positions, cell, nx, n
         group.attrs["Supercell_Repetitions"] = [nx, ny, nz]
 
 
-def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, ci_basis: bool) -> None:
-    dtype = settings.complex
+def _orca_to_slt(orca_source: Union[str, Iterator], slt_filepath: str, group_name: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, ci_basis: bool) -> None:
+    should_close = False
+    if isinstance(orca_source, str):
+        file = open(orca_source, "r")
+        should_close = True
+    else:
+        file = orca_source
 
-    # Retrieve dimensions and block sizes for spin-orbit calculations
-    (dim, num_of_whole_blocks, remaining_columns) = _get_orca_blocks_size(orca_filepath)
-    
-    # Create HDF5 file and ORCA group
-    with File(f"{slt_filepath}", "a") as slt:
-        group = slt.create_group(group_name)
-        group.attrs["Type"] = "HAMILTONIAN"
-        group.attrs["Kind"] = "ORCA"
-        group.attrs["Precision"] = settings.precision.upper()
-        group.attrs["States"] = dim
-        if ssc:
-            group.attrs["Hamiltonian_type"] = "SOC_SSC"
-        else:
-            group.attrs["Hamiltonian_type"] = "SOC"
-        if ci_basis:
-            group.attrs["Basis"] = "CI"
-        else:
-            group.attrs["Basis"] = "DIAGONAL"
-        if electric_dipole_momenta:
-            group.attrs["Additional"] = "ELECTRIC_DIPOLE_MOMENTA"
-        group.attrs["Description"] = "Relativistic ORCA results."
+    try:
+        dtype = settings.complex
 
-        # Extract and process matrices
-        pattern_type = [[r"SOC and SSC MATRIX \(A\.U\.\)\n"]] if ssc else [[r"SOC MATRIX \(A\.U\.\)\n"]]
-        pattern_type += [[r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"], [r"LX MATRIX IN CI BASIS\n", r"LY MATRIX IN CI BASIS\n", r"LZ MATRIX IN CI BASIS\n"]]
+        with File(f"{slt_filepath}", "a") as slt:
+            group = slt.create_group(group_name)
+            group.attrs["Type"] = "HAMILTONIAN"
+            group.attrs["Kind"] = "ORCA"
+            group.attrs["Precision"] = settings.precision.upper()
+            if ssc:
+                group.attrs["Hamiltonian_type"] = "SOC_SSC"
+            else:
+                group.attrs["Hamiltonian_type"] = "SOC"
+            if ci_basis:
+                group.attrs["Basis"] = "CI"
+            else:
+                group.attrs["Basis"] = "DIAGONAL"
+            if electric_dipole_momenta:
+                group.attrs["Additional"] = "ELECTRIC_DIPOLE_MOMENTA"
+            group.attrs["Description"] = "Relativistic ORCA results."
+
+            pattern_type = [[r"SOC and SSC MATRIX \(A\.U\.\)\n"]] if ssc else [[r"SOC MATRIX \(A\.U\.\)\n"]]
+            pattern_type += [[r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"], [r"LX MATRIX IN CI BASIS\n", r"LY MATRIX IN CI BASIS\n", r"LZ MATRIX IN CI BASIS\n"]]
+                
+            if ci_basis:
+                matrix_types = ["SOC_SSC_MATRIX"] if ssc else ["SOC_MATRIX"]
+                descriptions = [f"SOC {"and SSC " if ssc else ""}matrix in CI basis."]
+                descriptions += ["Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :] in CI basis.", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :] in CI basis."]
+            else:
+                matrix_types = ["STATES_ENERGIES"]
+                descriptions = ["States energies.", "Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :].", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :]."]
             
-        if ci_basis:
-            matrix_types = ["SOC_SSC_MATRIX"] if ssc else ["SOC_MATRIX"]
-            descriptions = [f"SOC {"and SSC " if ssc else ""}matrix in CI basis."]
-            descriptions += ["Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :] in CI basis.", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :] in CI basis."]
-        else:
-            matrix_types = ["STATES_ENERGIES"]
-            descriptions = ["States energies.", "Sx, Sy, and Sz spin matrices [(x-0, y-1, z-2), :, :].", "Lx, Ly, and Lz angular momentum matrices [(x-0, y-1, z-2), :, :]."]
-        
-        matrix_types += ["SPINS", "ANGULAR_MOMENTA"]
-        
-        if electric_dipole_momenta:
-            pattern_type.append([r"Matrix EDX in CI Basis\n", r"Matrix EDY in CI Basis\n", r"Matrix EDZ in CI Basis\n"])
-            matrix_types.append("ELECTRIC_DIPOLE_MOMENTA")
-            descriptions.append(f"Px, Py, and Pz electric dipole momentum [(x-0, y-1, z-2), :, :]{" in CI basis" if ci_basis else ""}.")
+            matrix_types += ["SPINS", "ANGULAR_MOMENTA"]
+            
+            if electric_dipole_momenta:
+                pattern_type.append([r"Matrix EDX in CI Basis\n", r"Matrix EDY in CI Basis\n", r"Matrix EDZ in CI Basis\n"])
+                matrix_types.append("ELECTRIC_DIPOLE_MOMENTA")
+                descriptions.append(f"Px, Py, and Pz electric dipole momentum [(x-0, y-1, z-2), :, :]{" in CI basis" if ci_basis else ""}.")
 
-        energy_number = 2 if pt2 else 1
+            energy_number = 2 if pt2 else 1
 
-        with open(f"{orca_filepath}", "r") as file:
+            multiplicities, nroots, active_orbitals, inactive_orbitals  = _get_orca_dimension_info(file)
+            dim = sum(multiplicities * nroots)
+            group.attrs["States"] = dim
+            number_of_whole_blocks = dim // 6
+            remaining_columns = dim % 6
             energy_block_flag = True
             matrix_number = 0
+
+            if ci_basis:
+                determinant_info = _parse_orca_spin_determinant_ci(file, multiplicities, nroots, inactive_orbitals)
+                group.attrs["Inactive_orbitals"] = inactive_orbitals
+                group.attrs["Active_orbitals"] = active_orbitals
+                group.attrs["Multiplicities"] = asarray(list(determinant_info.keys()), dtype=int64, order='C')
+                for mult, info in determinant_info.items():
+                    mult_group = group.create_group(f"MULTIPLICITY_{mult}")
+                    mult_group.attrs["Description"] = "Determinants type and root composition."
+                    mult_group.create_dataset("ALPHA_ORBITALS", data=info[0], chunks=True)
+                    mult_group.create_dataset("BETA_ORBITALS", data=info[1], chunks=True)
+                    mult_group.create_dataset("ROOTS_CI_COEFFICIENTS", data=info[2], chunks=True)
+
             for matrix_type, patterns, description in zip(matrix_types, pattern_type, descriptions):
                 if not energy_block_flag:
                     data = empty((3, dim, dim), dtype=settings.complex, order='C')
@@ -176,10 +197,10 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
                                 if energy_block_flag:
                                     for _ in range(3):
                                         next(file) # Skip 3 the first 3 lines if not electric dipole momenta
-                                    data_real = _orca_matrix_reader(dim, num_of_whole_blocks, remaining_columns, file, dtype, True)
+                                    data_real = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
                                     for _ in range(2):
                                         next(file) # Skip 2 lines separating real and imaginary part
-                                    data_imag = _orca_matrix_reader(dim, num_of_whole_blocks, remaining_columns, file, dtype, True)
+                                    data_imag = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
                                     data = data_real + 1j * data_imag
                                     if not ci_basis:
                                         energies, eigenvectors = eigh(data, driver="evr", check_finite=False, overwrite_a=True, overwrite_b=True)
@@ -189,7 +210,7 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
                                 if matrix_type != "ELECTRIC_DIPOLE_MOMENTA":
                                     for _ in range(3):
                                         next(file) # Skip the first 3 lines if not electric dipole momenta
-                                matrix = _orca_matrix_reader(dim, num_of_whole_blocks, remaining_columns, file, dtype)
+                                matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype)
                                 if pattern not in [r"SX MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"]:
                                     matrix = 1j*matrix
                                 if pattern in [r"SX MATRIX IN CI BASIS\n", r"SY MATRIX IN CI BASIS\n", r"SZ MATRIX IN CI BASIS\n"]:
@@ -203,6 +224,10 @@ def _orca_to_slt(orca_filepath: str, slt_filepath: str, group_name: str, pt2: bo
 
                 dataset = group.create_dataset(f"{matrix_type}", data=data, chunks = True)
                 dataset.attrs["Description"] = description
+
+    finally:
+        if should_close:
+            file.close()
 
 
 def _molcas_to_slt(molcas_filepath: str, slt_filepath: str, group_name: str, electric_dipole_momenta: bool = False) -> None:
@@ -273,37 +298,141 @@ def _exchange_hamiltonian_to_slt(slt_filepath: str, group_name: str, states: int
         save_dict_to_group(group, exchange_interactions, "EXCHANGE_INTERACTIONS")
 
 
-def _orca_fragovl_to_slt(orca_fragovl_filepath: str, slt_filepath: str, group_name: str, dim: int) -> None:
-    dtype = settings.float
-    number_of_whole_blocks = dim // 6
-    remaining_columns = dim % 6
+def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], slt_filepath: str, group_name: str, dim: int) -> None:
+    should_close = False
+    if isinstance(orca_fragovl_source, str):
+        file = open(orca_fragovl_source, "r")
+        should_close = True
+    else:
+        file = orca_fragovl_source
 
-    with File(f"{slt_filepath}", "a") as slt:
-        group = slt.create_group(group_name)
-        group.attrs["Type"] = "FRAGMENT_FRAMGENT_MO_OVERLAP"
-        group.attrs["Kind"] = "ORCA"
-        group.attrs["Precision"] = settings.precision.upper()
-        group.attrs["States"] = dim
+    try:
+        dtype = settings.float
+        number_of_whole_blocks = dim // 6
+        remaining_columns = dim % 6
 
-        with open(f"{orca_fragovl_filepath}", "r") as file:
-            for _ in range(9):
-                next(file)
-            fragment_fragment_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+        for _ in range(9):
+            next(file)
+        fragment_fragment_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+        for _ in range(5):
+            next(file)
+        fragment_A_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+        for _ in range(5):
+            next(file)
+        fragment_B_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
 
-            for _ in range(5):
-                next(file)
-            fragment_A_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+        fragment_fragment_MO_overlap_matrix = fragment_A_MO_matrix.T @ fragment_fragment_matrix @ fragment_B_MO_matrix
+    
+    finally:
+        if should_close:
+            file.close()
+    
+    return fragment_fragment_MO_overlap_matrix
 
-            for _ in range(5):
-                next(file)
-            fragment_B_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
 
-            print(max(diag(fragment_fragment_matrix)))
+def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, group_name: str, displacement_number: int, step: float, format: Literal["ORCA"] = "ORCA", pt2: bool = False, electric_dipole_momenta: bool = False, ssc: bool = False):
+    try:
+        with File(f"{slt_filepath}", "a") as slt:
+            group = slt.create_group(group_name)
+            group.attrs["Type"] = "HAMILTONIAN_DERIVATIVES"
+            group.attrs["Kind"] = "ORCA"
+            group.attrs["Precision"] = settings.precision.upper()
+            group.attrs["Displacement_number"] = displacement_number
+            if ssc:
+                group.attrs["Hamiltonian_type"] = "SOC_SSC"
+            else:
+                group.attrs["Hamiltonian_type"] = "SOC"
+            if electric_dipole_momenta:
+                group.attrs["Additional"] = "ELECTRIC_DIPOLE_MOMENTA"
+            group.attrs["Description"] = "Relativistic ORCA hamiltonian derivatives."
 
-        fragment_fragment_MO_overlap_matrix = fragment_A_MO_matrix @ fragment_fragment_matrix @ fragment_B_MO_matrix.T
+        if format == "ORCA":
+            read_hamiltonian = _orca_to_slt
+            read_molecular_orbital_overlaps = _orca_fragovl_reader
+        else:
+            raise ValueError("Currently the only suported format is 'ORCA'.")
+
+        dof_disp_out_files = glob(join(dirpath, "dof_*.out"))
+        pattern_simple = compile(join(dirpath, r'dof_(-?\d+)_disp_(-?\d+)\.out'))
+        pattern_extended = compile(join(dirpath, r'dof_(-?\d+)_nx_(-?\d+)_ny_(-?\d+)_nz_(-?\d+)_disp_(-?\d+)\.out'))
+
+        displacement_data = defaultdict(set)
+
+        for filename in dof_disp_out_files:
+            match = pattern_simple.match(filename)
+            if match:
+                dof_number = int(match.group(1))
+                disp_number = int(match.group(2))
+                nx = ny = nz = 0
+            else:
+                match = pattern_extended.match(filename)
+                if match:
+                    dof_number = int(match.group(1))
+                    nx = int(match.group(2))
+                    ny = int(match.group(3))
+                    nz = int(match.group(4))
+                    disp_number = int(match.group(5))
+                else:
+                    continue
+
+            displacement_data[(dof_number, nx, ny, nz)].add(disp_number)
+
+        required_disps_0 = set(range(-displacement_number, displacement_number+1))
+        required_disps = required_disps_0 - {0}
+        found_dof_0 = False
+
+        for (dof_number, nx, ny, nz), disps in displacement_data.items():
+            if dof_number == 0 and nx == 0 and ny == 0 and nz == 0:
+                if disps != required_disps_0:
+                    raise ValueError(f"Output files for dof=0 have incorect set of displacements. They should be in the set: {required_disps_0}.")
+                else:
+                    found_dof_0 = True
+            else:
+                if disps != required_disps:
+                    missing = required_disps - disps
+                    extra = disps - required_disps
+                    message_parts = []
+                    if missing:
+                        message_parts.append(f"missing: {sorted(missing)}")
+                    if extra:
+                        message_parts.append(f"extra: {sorted(extra)}")
+
+                    error_message = (f"Incorrect displacement set for dof={dof_number}, nx={nx}, ny={ny}, nz={nz}. Discrepancies: {', '.join(message_parts)}.")
+                    raise ValueError(error_message)
+            
+            gbw_exists = False
+
+            for disp in disps:
+                if nx == 0 and ny == 0 and nz == 0:
+                    gbw_exists = exists(join(dirpath, f"dof_{dof_number}_disp_{disp}.gbw"))
+                if not gbw_exists:
+                    gbw_exists = exists(join(dirpath, f"dof_{dof_number}_nx_{nx}_ny_{ny}_nz_{nz}_disp_{disp}.gbw"))
+                if not gbw_exists:
+                    raise ValueError(f"GBW file for dof={dof_number}, disp={disp}, nx={nx}, ny={ny}, nz={nz} not found in the directory.")
         
-        group.create_dataset("MO_OVERLAP", data=fragment_fragment_MO_overlap_matrix, chunks=True)
+        if not found_dof_0:
+            raise ValueError("Output files for dof=0 not found in the directory.")
+        
+        sorted_displacement_data = {key: displacement_data[key] for key in sorted(displacement_data)}
+        
+        for (dof_number, nx, ny, nz), disps in sorted_displacement_data.items():
+            for disp in disps:
+                out_exists = False
+                if nx == 0 and ny == 0 and nz == 0:
+                    out_file = f"dof_{dof_number}_disp_{disp}.out"
+                    out_filepath = join(dirpath, out_file)
+                    out_exists = exists(out_filepath)
+                if not out_exists:
+                    out_file = f"dof_{dof_number}_nx_{nx}_ny_{ny}_nz_{nz}_disp_{disp}.out"
+                    out_filepath = join(dirpath, out_file)
+                read_hamiltonian(out_filepath, slt_filepath, f"{group_name}/{out_file[:-4]}", pt2, electric_dipole_momenta, ssc, True)
 
+            hamiltonian_derivative_matrix, displacements_phase_corrections = _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath, dirpath, dof_number, nx, ny, nz, displacement_number, step)
+
+            # Here save hamiltonian matrix in a group dof_nx_ny_nz (without disp that was used) and apply phase corrections for all matrices in hdf5 groups
+
+    except Exception as exc:
+        raise SltReadError(slt_filepath, exc, f"Failed to load Hamiltonian derivatives from directory '{dirpath}'")
 
 
 def _create_dataset(group, name, data):
@@ -338,11 +467,7 @@ def save_dict_to_group(group, data_dict, subgroup_name):
 ##############################
 
 
-def _get_orca_blocks_size(orca_filepath: str) -> tuple[int, int, int]:
-
-    casscf_section = False
-    input_section = False
-
+def _get_orca_dimension_info(file: Iterator) -> tuple[int, int, int, int, int]:
     input_file_start_re = compile(r'^\s*INPUT FILE')
     input_file_end_re = compile(r'^\s*\*{4}END OF INPUT\*{4}')
     casscf_start_re = compile(r'^\s*\|\s*\d+>\s*%casscf', IGNORECASE)
@@ -350,52 +475,181 @@ def _get_orca_blocks_size(orca_filepath: str) -> tuple[int, int, int]:
     mult_re = compile(r'^\s*\|\s*\d+>\s*mult\s+(.*)', IGNORECASE)
     nroots_re = compile(r'^\s*\|\s*\d+>\s*nroots\s+(.*)', IGNORECASE)
 
+    active_re = compile(r'Number of active orbitals\s+\.\.\.\s+(\d+)')
+    internal_re = compile(r'Internal\s+\d+\s*-\s*\d+\s*\(\s*(\d+)\s+orbitals\)')
+
+    input_section = False
+    casscf_section = False
     found_mult = False
     found_nroots = False
+    multiplicities = None
+    nroots = None
 
-    with open(orca_filepath, 'r') as file:
-        for line in file:
-            if input_file_start_re.match(line):
-                input_section = True
+    while True:
+        line = next(file)
+        if input_file_start_re.match(line):
+            input_section = True
+            continue
+        elif input_file_end_re.match(line):
+            input_section = False
+            if not (found_mult and found_nroots):
+                raise ValueError("Could not find multiplicities or nroots in the input section.")
+            break
+
+        if input_section:
+            if casscf_start_re.match(line):
+                casscf_section = True
                 continue
-            elif input_file_end_re.match(line):
-                input_section = False
+            elif casscf_end_re.match(line) and casscf_section:
+                casscf_section = False
                 continue
 
-            if input_section:
-                if casscf_start_re.match(line):
-                    casscf_section = True
-                    continue
-                elif casscf_end_re.match(line) and casscf_section:
-                    casscf_section = False
-                    continue
+            if casscf_section:
+                if not found_mult:
+                    mult_match = mult_re.match(line)
+                    if mult_match:
+                        mult_values = mult_match.group(1)
+                        multiplicities = asarray(list(map(int, findall(r'\d+', mult_values))), dtype=int64)
+                        found_mult = True
+                        if found_nroots:
+                            break
 
-                if casscf_section:
-                    if not found_mult:
-                        mult_match = mult_re.match(line)
-                        if mult_match:
-                            mult_values = mult_match.group(1)
-                            multiplicities = asarray(list(map(int, findall(r'\d+', mult_values))), dtype=int64)
-                            found_mult = True
-                            if found_nroots:
-                                break
-                            continue
+                if not found_nroots:
+                    nroots_match = nroots_re.match(line)
+                    if nroots_match:
+                        nroots_values = nroots_match.group(1)
+                        nroots = asarray(list(map(int, findall(r'\d+', nroots_values))), dtype=int64)
+                        found_nroots = True
+                        if found_mult:
+                            break
 
-                    if not found_nroots:
-                        nroots_match = nroots_re.match(line)
-                        if nroots_match:
-                            nroots_values = nroots_match.group(1)
-                            nroots = asarray(list(map(int, findall(r'\d+', nroots_values))), dtype=int64)
-                            found_nroots = True
-                            if found_mult:
-                                break
-                            continue
-    
-    dim = sum(multiplicities * nroots)
-    number_of_whole_blocks = dim // 6
-    remaining_columns = dim % 6
+    if multiplicities is None or nroots is None:
+        raise ValueError("Failed to find multiplicities or nroots.")
 
-    return dim, number_of_whole_blocks, remaining_columns
+    active_orbitals = None
+    inactive_orbitals = None
+    determined_ranges_found = False
+
+    while True:
+        line = next(file)
+
+        if active_orbitals is None:
+            active_match = active_re.search(line)
+            if active_match:
+                active_orbitals = int(active_match.group(1))
+
+        if "Determined orbital ranges:" in line:
+            determined_ranges_found = True
+            continue
+
+        if determined_ranges_found and inactive_orbitals is None:
+            internal_match = internal_re.search(line)
+            if internal_match:
+                inactive_orbitals = int(internal_match.group(1))
+                break
+
+    if active_orbitals is None:
+        raise ValueError("Could not find the number of active orbitals.")
+    if inactive_orbitals is None:
+        raise ValueError("Could not find the number of inactive (internal) orbitals.")
+
+    return multiplicities, nroots, active_orbitals, inactive_orbitals
+
+
+def _decode_orca_determinant(det_str: str, inactive_orbitals: int) -> tuple[list[int], list[int]]:
+    alpha_orbs = []
+    beta_orbs = []
+    for i, ch in enumerate(det_str):
+        orb_num = inactive_orbitals + i
+        if ch == 'u':
+            alpha_orbs.append(orb_num)
+        elif ch == 'd':
+            beta_orbs.append(orb_num)
+        elif ch == '2':
+            alpha_orbs.append(orb_num)
+            beta_orbs.append(orb_num)
+        elif ch == '0':
+            pass
+        else:
+            raise ValueError(f"Unknown determinant character '{ch}' in {det_str}")
+    return alpha_orbs, beta_orbs
+
+
+def _parse_orca_spin_determinant_ci(file: Iterator, multiplicities: int, nroots: int, inactive_orbitals: int):
+    dtype = settings.float
+
+    ci_start_re = compile(r'^\s*Spin-Determinant CI Printing\s*$')
+    root_start_re = compile(r'^ROOT\s+(\d+):\s+E=')
+    det_line_re = compile(r'^\s*\[([ud20]+)\]\s+([-\d.]+)')
+
+    results = {}
+
+    for mult, nr in zip(multiplicities, nroots):
+        while True:
+            line = next(file)
+            if ci_start_re.search(line):
+                break
+
+        determinant_patterns = []
+
+        def parse_root_block(parse_determinants=False):
+            next(file) # Skip line after ROOT info
+            coeffs = []
+            count = 0
+            while True:
+                line = next(file)
+                det_match = det_line_re.match(line)
+                if det_match:
+                    det_str, coeff_str = det_match.groups()
+                    coeff_value = dtype(coeff_str)
+                    coeffs.append(coeff_value)
+                    if parse_determinants:
+                        determinant_patterns.append(det_str)
+                    count += 1
+                else:
+                    break
+            
+            coeffs = asarray(coeffs, dtype=dtype, order='C')
+            
+            return coeffs, count
+
+        while True:
+            line = next(file)
+            rmatch = root_start_re.match(line)
+            if rmatch:
+                root_idx = int(rmatch.group(1))
+                if root_idx == 0:
+                    first_root_coeffs, M = parse_root_block(parse_determinants=True)
+                    determinant_alpha_info = []
+                    determinant_beta_info = []
+                    for det_str in determinant_patterns:
+                        alpha_list, beta_list = _decode_orca_determinant(det_str, inactive_orbitals)
+                        determinant_alpha_info.append(alpha_list)
+                        determinant_beta_info.append(beta_list)
+                    determinant_alpha_info = asarray(determinant_alpha_info, dtype=int64, order='C')
+                    determinant_beta_info = asarray(determinant_beta_info, dtype=int64, order='C')
+                    ci_coeffs = zeros((M, nr), dtype=float)
+                    ci_coeffs[:, 0] = first_root_coeffs
+                    break
+                else:
+                    raise RuntimeError(f"Could not find 'ROOT 0' for the multiplicity {mult}.")
+
+        for root_index in range(1, nr):
+            line = next(file)
+            rmatch = root_start_re.match(line)
+            if not rmatch or int(rmatch.group(1)) != root_index:
+                while not (rmatch and int(rmatch.group(1)) == root_index):
+                    line = next(file)
+                    rmatch = root_start_re.match(line)
+
+            root_coeffs, count = parse_root_block(parse_determinants=False)
+            if count != ci_coeffs.shape[0]:
+                raise ValueError(f"Inconsistent number of determinants for ROOT {root_index}. Expected {ci_coeffs.shape[0]}, got {count}.")
+            ci_coeffs[:, root_index] = root_coeffs
+
+        results[mult] = (determinant_alpha_info, determinant_beta_info, ci_coeffs)
+
+    return results
 
 
 def _orca_matrix_reader(dim: int, number_of_whole_blocks: int, remaining_columns: int, file: Iterator, dtype: dtype, fix: bool = False) -> ndarray:
@@ -436,7 +690,13 @@ def _orca_matrix_reader(dim: int, number_of_whole_blocks: int, remaining_columns
     return matrix
 
 
-def _read_forces_cp2k(filepath, dof_number):
+def _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath: str, gbw_path: str, dof: int, nx: int, ny: int, nz: int, displacement_number: int):
+    hamiltonian_derivative_matrix = None
+    displacements_phase_corrections = None
+    return hamiltonian_derivative_matrix, displacements_phase_corrections
+
+
+def _read_forces_cp2k(filepath: str, dof_number: int):
     return loadtxt(filepath, dtype = settings.float, skiprows=4, usecols=(3,4,5), max_rows=dof_number)
 
 
@@ -467,7 +727,7 @@ def _read_dipole_momenta_cp2k(file_path):
     raise ValueError('Dipole moment line not found in file')
 
 
-def _read_hessian_born_charges_from_dir(dirpath, format, dof_number, nx, ny, nz, displacement_number, step, accoustic_sum_rule: Literal["symmetric", "self_term", "without"] = "symmetric", dipole_momenta = True, force_files_suffix = None, dipole_momenta_files_suffix = None):
+def _read_hessian_born_charges_from_dir(dirpath: str, format: Literal["CP2K"], dof_number: int, nx: int, ny: int, nz: int, displacement_number: int , step: float, accoustic_sum_rule: Literal["symmetric", "self_term", "without"] = "symmetric", dipole_momenta: bool = True, force_files_suffix: str = None, dipole_momenta_files_suffix: str = None):
     atoms_in_file = nx * ny * nz * dof_number // 3
     hessian = zeros(shape=(dof_number, atoms_in_file, 3), order="C", dtype = settings.float)
     finite_difference_stencil = _central_finite_difference_stencil(1, displacement_number, step * A_BOHR)
@@ -482,7 +742,7 @@ def _read_hessian_born_charges_from_dir(dirpath, format, dof_number, nx, ny, nz,
             default_force_suffix = "-1_0.xyz"
             default_dipole_momenta_suffix = "-moments-1_0.dat"
         else:
-            raise ValueError("The only suported format is 'CP2K'.")
+            raise ValueError("Currently the only suported format is 'CP2K'.")
 
         for dof in range(dof_number):
             stencil_index = -1

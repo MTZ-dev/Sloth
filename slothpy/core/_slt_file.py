@@ -1917,8 +1917,8 @@ class SltHessian(SltSuperCell):
 ####################
 
 
-class SltPropertyCoordinateDerivative(SltXyz):
-    _method_type = "PROPERTY_DERIVATIVE"
+class SltHamiltonianDerivatives(SltHessian):
+    _method_type = "HAMILTONIAN_DERIVATIVES"
 
     __slots__ = SltXyz.__slots__
 

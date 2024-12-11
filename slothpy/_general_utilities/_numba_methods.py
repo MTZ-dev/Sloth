@@ -29,7 +29,7 @@ from numba import jit, prange, types, int64, float32, float64, complex64, comple
     inline="always",
     parallel=True,
 )
-def _dynamical_matrix(hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarray, array_dtype: ndarray):
+def _build_dynamical_matrix(hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarray, array_dtype: ndarray):
 
     dyn_mat = zeros(masses_inv_sqrt.shape, dtype=array_dtype.dtype)
 

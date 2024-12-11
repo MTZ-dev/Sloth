@@ -555,7 +555,6 @@ def main():
             if dof_number == 0 and disp_number == 0:
                 continue  # Already processed
             project_name = f'dof_{dof_number}_disp_{disp_number}'
-
         else:
             match = pattern_extended.match(filename)
             if match:

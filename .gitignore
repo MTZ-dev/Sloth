@@ -17,6 +17,7 @@
 *.pyd
 *.traj
 *.pdb
+*.gbw
 __pycache__
 .vscode
 .ipynb_checkpoints
