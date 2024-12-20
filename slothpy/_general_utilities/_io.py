@@ -15,19 +15,24 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from typing import Union, Literal, Iterator
+from os import remove
 from os.path import join, exists
 from glob import glob
 from re import compile, search, findall, MULTILINE, IGNORECASE
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from subprocess import Popen, PIPE
+from functools import partial
 
 from h5py import File, string_dtype
-from numpy import ndarray, dtype, bytes_, asarray, zeros, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, min, int64, diag
+from numpy import ndarray, dtype, bytes_, asarray, zeros, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, min, int64, diag, asfortranarray
 from scipy.linalg import eigh
 
 from slothpy.core._slothpy_exceptions import SltReadError
 from slothpy.core._config import settings
 from slothpy._general_utilities._math_expresions import _central_finite_difference_stencil
 from slothpy._general_utilities._constants import A_BOHR
+from slothpy.core._process_pool import _worker_wrapper
 
 #####################
 # Helpers for SltFile
@@ -125,7 +130,6 @@ def _orca_to_slt(orca_source: Union[str, Iterator], slt_filepath: str, group_nam
 
     try:
         dtype = settings.complex
-
         with File(f"{slt_filepath}", "a") as slt:
             group = slt.create_group(group_name)
             group.attrs["Type"] = "HAMILTONIAN"
@@ -163,7 +167,7 @@ def _orca_to_slt(orca_source: Union[str, Iterator], slt_filepath: str, group_nam
 
             energy_number = 2 if pt2 else 1
 
-            multiplicities, nroots, active_orbitals, inactive_orbitals  = _get_orca_dimension_info(file)
+            multiplicities, nroots, active_orbitals, total_orbitals, inactive_orbitals  = _get_orca_dimension_info(file)
             dim = sum(multiplicities * nroots)
             group.attrs["States"] = dim
             number_of_whole_blocks = dim // 6
@@ -172,9 +176,10 @@ def _orca_to_slt(orca_source: Union[str, Iterator], slt_filepath: str, group_nam
             matrix_number = 0
 
             if ci_basis:
-                determinant_info = _parse_orca_spin_determinant_ci(file, multiplicities, nroots, inactive_orbitals)
+                determinant_info = _parse_orca_spin_determinant_ci(file, multiplicities, nroots)
                 group.attrs["Inactive_orbitals"] = inactive_orbitals
                 group.attrs["Active_orbitals"] = active_orbitals
+                group.attrs["Total_orbitals"] = total_orbitals
                 group.attrs["Multiplicities"] = asarray(list(determinant_info.keys()), dtype=int64, order='C')
                 for mult, info in determinant_info.items():
                     mult_group = group.create_group(f"MULTIPLICITY_{mult}")
@@ -298,44 +303,12 @@ def _exchange_hamiltonian_to_slt(slt_filepath: str, group_name: str, states: int
         save_dict_to_group(group, exchange_interactions, "EXCHANGE_INTERACTIONS")
 
 
-def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], slt_filepath: str, group_name: str, dim: int) -> None:
-    should_close = False
-    if isinstance(orca_fragovl_source, str):
-        file = open(orca_fragovl_source, "r")
-        should_close = True
-    else:
-        file = orca_fragovl_source
-
-    try:
-        dtype = settings.float
-        number_of_whole_blocks = dim // 6
-        remaining_columns = dim % 6
-
-        for _ in range(9):
-            next(file)
-        fragment_fragment_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
-        for _ in range(5):
-            next(file)
-        fragment_A_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
-        for _ in range(5):
-            next(file)
-        fragment_B_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
-
-        fragment_fragment_MO_overlap_matrix = fragment_A_MO_matrix.T @ fragment_fragment_matrix @ fragment_B_MO_matrix
-    
-    finally:
-        if should_close:
-            file.close()
-    
-    return fragment_fragment_MO_overlap_matrix
-
-
-def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, group_name: str, displacement_number: int, step: float, format: Literal["ORCA"] = "ORCA", pt2: bool = False, electric_dipole_momenta: bool = False, ssc: bool = False):
+def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, group_name: str, displacement_number: int, step: float, number_processes: int, number_threads: int, format: Literal["ORCA"] = "ORCA", pt2: bool = False, electric_dipole_momenta: bool = False, ssc: bool = False, _orca_fragovl_path: str = "."):
     try:
         with File(f"{slt_filepath}", "a") as slt:
             group = slt.create_group(group_name)
             group.attrs["Type"] = "HAMILTONIAN_DERIVATIVES"
-            group.attrs["Kind"] = "ORCA"
+            group.attrs["Kind"] = format
             group.attrs["Precision"] = settings.precision.upper()
             group.attrs["Displacement_number"] = displacement_number
             if ssc:
@@ -348,7 +321,7 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
 
         if format == "ORCA":
             read_hamiltonian = _orca_to_slt
-            read_molecular_orbital_overlaps = _orca_fragovl_reader
+            read_overlaps_hamiltonians = _orca_process_overlap_mch_basis_hamiltonian
         else:
             raise ValueError("Currently the only suported format is 'ORCA'.")
 
@@ -415,19 +388,44 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
         
         sorted_displacement_data = {key: displacement_data[key] for key in sorted(displacement_data)}
         
-        for (dof_number, nx, ny, nz), disps in sorted_displacement_data.items():
-            for disp in disps:
-                out_exists = False
-                if nx == 0 and ny == 0 and nz == 0:
-                    out_file = f"dof_{dof_number}_disp_{disp}.out"
-                    out_filepath = join(dirpath, out_file)
-                    out_exists = exists(out_filepath)
-                if not out_exists:
-                    out_file = f"dof_{dof_number}_nx_{nx}_ny_{ny}_nz_{nz}_disp_{disp}.out"
-                    out_filepath = join(dirpath, out_file)
-                read_hamiltonian(out_filepath, slt_filepath, f"{group_name}/{out_file[:-4]}", pt2, electric_dipole_momenta, ssc, True)
+        try:
+            tmp_files = []
+            with ProcessPoolExecutor(number_processes) as executor:
+                futures = []
+                for (dof_number, nx, ny, nz), disps in sorted_displacement_data.items():
+                    for disp in disps:
+                        out_exists = False
+                        if nx == 0 and ny == 0 and nz == 0:
+                            out_file = f"dof_{dof_number}_disp_{disp}.out"
+                            out_filepath = join(dirpath, out_file)
+                            out_exists = exists(out_filepath)
+                        if not out_exists:
+                            out_file = f"dof_{dof_number}_nx_{nx}_ny_{ny}_nz_{nz}_disp_{disp}.out"
+                            out_filepath = join(dirpath, out_file)
+                        if disp == 0:
+                            tmp_0 = join(dirpath, "0.tmp")
+                            tmp_files.append(tmp_0)
+                            gbw_0 = out_filepath[:-3] + "gbw"
+                            read_hamiltonian(out_filepath, tmp_0, "tmp", pt2, electric_dipole_momenta, ssc, True)
+                            with File(tmp_0, 'r') as file:
+                                dim = file["tmp"].attrs["Total_orbitals"]
+                        else:
+                            gbw_tmp = out_filepath[:-3] + "gbw"
+                            tmp_files.append(join(dirpath, f"{dof_number}_{nx}_{ny}_{nz}_{disp}.tmp"))
+                            args = [dirpath, out_filepath, pt2, electric_dipole_momenta, ssc, gbw_0, gbw_tmp, dim, tmp_0, dof_number, nx, ny, nz, disp, _orca_fragovl_path]
+                            futures.append(executor.submit(_worker_wrapper, read_overlaps_hamiltonians, args, number_threads))
+                for completed_dof_disp in as_completed(futures):
+                    pass
+        finally:
+            for tmp_file in tmp_files:
+                if exists(tmp_file):
+                    try:
+                        remove(tmp_file)
+                    except Exception as e:
+                        print(f"Error removing {file} file. You must do it manually.")
+                        raise
 
-            hamiltonian_derivative_matrix, displacements_phase_corrections = _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath, dirpath, dof_number, nx, ny, nz, displacement_number, step)
+            # hamiltonian_derivative_matrix, displacements_phase_corrections = _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath, dirpath, dof_number, nx, ny, nz, displacement_number, step)
 
             # Here save hamiltonian matrix in a group dof_nx_ny_nz (without disp that was used) and apply phase corrections for all matrices in hdf5 groups
 
@@ -476,6 +474,7 @@ def _get_orca_dimension_info(file: Iterator) -> tuple[int, int, int, int, int]:
     nroots_re = compile(r'^\s*\|\s*\d+>\s*nroots\s+(.*)', IGNORECASE)
 
     active_re = compile(r'Number of active orbitals\s+\.\.\.\s+(\d+)')
+    total_re = compile(r'Total number of orbitals\s+\.\.\.\s+(\d+)')
     internal_re = compile(r'Internal\s+\d+\s*-\s*\d+\s*\(\s*(\d+)\s+orbitals\)')
 
     input_section = False
@@ -527,6 +526,7 @@ def _get_orca_dimension_info(file: Iterator) -> tuple[int, int, int, int, int]:
         raise ValueError("Failed to find multiplicities or nroots.")
 
     active_orbitals = None
+    total_orbitals = None
     inactive_orbitals = None
     determined_ranges_found = False
 
@@ -537,6 +537,11 @@ def _get_orca_dimension_info(file: Iterator) -> tuple[int, int, int, int, int]:
             active_match = active_re.search(line)
             if active_match:
                 active_orbitals = int(active_match.group(1))
+        
+        if total_orbitals is None:
+            total_match = total_re.search(line)
+            if total_match:
+                total_orbitals = int(total_match.group(1))
 
         if "Determined orbital ranges:" in line:
             determined_ranges_found = True
@@ -550,17 +555,19 @@ def _get_orca_dimension_info(file: Iterator) -> tuple[int, int, int, int, int]:
 
     if active_orbitals is None:
         raise ValueError("Could not find the number of active orbitals.")
+    if total_orbitals is None:
+        raise ValueError("Could not find the total number of orbitals.")
     if inactive_orbitals is None:
         raise ValueError("Could not find the number of inactive (internal) orbitals.")
 
-    return multiplicities, nroots, active_orbitals, inactive_orbitals
+    return multiplicities, nroots, active_orbitals, total_orbitals, inactive_orbitals
 
 
-def _decode_orca_determinant(det_str: str, inactive_orbitals: int) -> tuple[list[int], list[int]]:
+def _decode_orca_determinant(det_str: str) -> tuple[list[int], list[int]]:
     alpha_orbs = []
     beta_orbs = []
     for i, ch in enumerate(det_str):
-        orb_num = inactive_orbitals + i
+        orb_num = i
         if ch == 'u':
             alpha_orbs.append(orb_num)
         elif ch == 'd':
@@ -575,7 +582,7 @@ def _decode_orca_determinant(det_str: str, inactive_orbitals: int) -> tuple[list
     return alpha_orbs, beta_orbs
 
 
-def _parse_orca_spin_determinant_ci(file: Iterator, multiplicities: int, nroots: int, inactive_orbitals: int):
+def _parse_orca_spin_determinant_ci(file: Iterator, multiplicities: int, nroots: int):
     dtype = settings.float
 
     ci_start_re = compile(r'^\s*Spin-Determinant CI Printing\s*$')
@@ -623,7 +630,7 @@ def _parse_orca_spin_determinant_ci(file: Iterator, multiplicities: int, nroots:
                     determinant_alpha_info = []
                     determinant_beta_info = []
                     for det_str in determinant_patterns:
-                        alpha_list, beta_list = _decode_orca_determinant(det_str, inactive_orbitals)
+                        alpha_list, beta_list = _decode_orca_determinant(det_str)
                         determinant_alpha_info.append(alpha_list)
                         determinant_beta_info.append(beta_list)
                     determinant_alpha_info = asarray(determinant_alpha_info, dtype=int64, order='C')
@@ -688,6 +695,84 @@ def _orca_matrix_reader(dim: int, number_of_whole_blocks: int, remaining_columns
         matrix[:, l:l+remaining_columns] = data
 
     return matrix
+
+
+def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], dim: int) -> ndarray:
+    should_close = False
+    if isinstance(orca_fragovl_source, str):
+        file = open(orca_fragovl_source, "r")
+        should_close = True
+    else:
+        file = orca_fragovl_source
+
+    try:
+        dtype = settings.float
+        number_of_whole_blocks = dim // 6
+        remaining_columns = dim % 6
+
+        for _ in range(9):
+            next(file)
+        fragment_fragment_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+        for _ in range(5):
+            next(file)
+        fragment_A_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+        for _ in range(5):
+            next(file)
+        fragment_B_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
+
+        fragment_fragment_MO_overlap_matrix = fragment_A_MO_matrix.T @ fragment_fragment_matrix @ fragment_B_MO_matrix
+    
+    finally:
+        if should_close:
+            file.close()
+    
+    return fragment_fragment_MO_overlap_matrix
+
+
+def _orca_process_overlap_mch_basis_hamiltonian(out_dir, out_filepath: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, gbw_zero_filepath:str, gbw_tmp_filepath: str, dim: int, zero_filepath: str, dof_number: int, nx: int, ny: int, nz: int, displacement_number: int, _orca_fragovl_filepath: str):
+    tmp_filepath = join(out_dir, f"{dof_number}_{nx}_{ny}_{nz}_{displacement_number}.tmp")
+    _orca_to_slt(out_filepath, tmp_filepath, "tmp", pt2, electric_dipole_momenta, ssc, True)
+    
+    process = Popen([_orca_fragovl_filepath, gbw_zero_filepath, gbw_tmp_filepath], stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True)
+    fragment_fragment_MO_overlap_matrix = _orca_fragovl_reader(process.stdout, dim)
+
+    with File(tmp_filepath, 'r+') as tmp_file:
+        tmp_group = tmp_file["tmp"]
+        inactive_orbitals = tmp_group.attrs["Inactive_orbitals"]
+        active_orbitals = tmp_group.attrs["Active_orbitals"]
+        multiplicities = tmp_group.attrs["Multiplicities"]
+
+        inner_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[:inactive_orbitals, :inactive_orbitals])
+        active_right_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[:inactive_orbitals, inactive_orbitals:inactive_orbitals+active_orbitals])
+        active_left_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[inactive_orbitals:inactive_orbitals+active_orbitals, :inactive_orbitals])
+        active_active_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[inactive_orbitals:inactive_orbitals+active_orbitals, inactive_orbitals:inactive_orbitals+active_orbitals])
+        del fragment_fragment_MO_overlap_matrix
+
+        multiplicity_wavefunction_overlap_dict = {}
+
+        for mult in multiplicities:
+            with File(zero_filepath, 'r') as zero_file:
+                zero_tmp_group = zero_file["tmp"]
+                mult_group = zero_tmp_group[f"MULTIPLICITY_{mult}"]
+                zero_alpha_orbitals = mult_group["ALPHA_ORBITALS"]
+                zero_beta_orbitals = mult_group["BETA_ORBITALS"]
+                zero_ci_coefficients = mult_group["ROOTS_CI_COEFFICIENTS"]
+
+            mult_group = tmp_group[f"MULTIPLICITY_{mult}"]
+            alpha_orbitals = mult_group["ALPHA_ORBITALS"]
+            beta_orbitals = mult_group["BETA_ORBITALS"]
+            ci_coefficients = mult_group["ROOTS_CI_COEFFICIENTS"]
+
+            multiplicity_wavefunction_overlap_dict[mult] = _calculate_wavefunction_overlap_phase_correction(inner_matrix, active_right_matrix, active_left_matrix, active_active_matrix, zero_alpha_orbitals, zero_beta_orbitals, alpha_orbitals, beta_orbitals, zero_ci_coefficients, ci_coefficients)
+
+
+    # import matplotlib.pyplot as plt
+    # import numpy as np
+
+    # fig, ax = plt.subplots()
+    # cax = ax.imshow(fragment_fragment_MO_overlap_matrix, cmap='RdBu', vmin=-1, vmax=1)
+    # fig.colorbar(cax, ax=ax)
+    # plt.show()
 
 
 def _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath: str, gbw_path: str, dof: int, nx: int, ny: int, nz: int, displacement_number: int):

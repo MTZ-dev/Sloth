@@ -7,7 +7,7 @@ This script automates ORCA calculations of displacement directories created by S
 - Automates initial PBE and CASSCF calculations required for open-shell lanthanide systems.
 - Manages computational resources by adjusting the number of CPUs and processes.
 - Cleans up unnecessary files after each calculation to save disk space.
-- Provides an option to include NEVPT2 calculations.
+- Provides an option to include NEVPT2 calculations and SSC (Spin-Spin Coupling).
 - Supports parallel processing to expedite calculations.
 - **Allows users to provide their own starting `.qro` or `.gbw` files to skip initial calculations.**
 
@@ -70,6 +70,7 @@ This script automates ORCA calculations of displacement directories created by S
   - **Processes (`--processes`):** Number of parallel processes to run (for the displacement calculations).
   - **Maximum Memory (`--max_memory`):** Total memory available for calculations (in MB).
   - **NEVPT2 Option (`--use_nevpt2`):** Include this flag if you want to perform NEVPT2 calculations.
+  - **NEVPT2 Option (`--ssc`):** Include this flag if you want to include Spin-Spin coupling along with Spin-Orbit coupling.
   - **NoFrozenCore Option (`--nofrozencore`):** Set this flag to use ORCA's NoFrozenCore option during CASSCF calculations.
 
 - **Resource Allocation:**
@@ -115,11 +116,13 @@ python run_displacements_ORCA.py --cpus 64 --processes 4 --orca_path /path/to/or
   - `--orca_path`: Full path to the ORCA executable (e.g., `/usr/local/orca/orca`).
   - `--max_memory`: Total maximum memory in MB (e.g., `8000` for 8 GB).
   - `--use_nevpt2`: Include this flag to perform NEVPT2 calculations.
+  - `--ssc`: Include this flag if you want to include Spin-Spin coupling along with Spin-Orbit coupling.
+  - `--nofrozencore`: Set this flag to use ORCA's NoFrozenCore option during CASSCF calculations.
 
-**Example with NEVPT2 Enabled:**
+**Example with NEVPT2/SSC Enabled:**
 
 ```bash
-python run_displacements_ORCA.py --cpus 64 --processes 4 --orca_path /usr/local/orca/orca --max_memory 8000 --use_nevpt2
+python run_displacements_ORCA.py --cpus 64 --processes 4 --orca_path /usr/local/orca/orca --max_memory 8000 --use_nevpt2 --ssc
 ```
 
 ---
