@@ -85,3 +85,5 @@ def _worker_wrapper(worker, args, number_threads, result_queue=None):
         result = worker(*args)
     if result_queue is not None:
         result_queue.put(result)
+
+    return result # This can break something later on (added for the io imap return)

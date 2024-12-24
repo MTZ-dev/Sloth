@@ -1,14 +1,16 @@
 # distutils: language = c
+# distutils: define NDEBUG
 # cython: boundscheck = False
 # cython: wraparound = False
 # cython: cdivision = True
+# cython: nonecheck = False
 # cython: language_level = 3
 
-from cython cimport nonecheck, wraparound, boundscheck, initializedcheck
+from cython cimport nonecheck, wraparound, boundscheck, initializedcheck, cdivision
 
 cimport numpy as cnp
 from scipy.linalg.cython_blas cimport zaxpy, zgemm, zhemm, zdotc, caxpy, cgemm, chemm, cdotc
-from scipy.linalg.cython_lapack cimport zheevr, cheevr
+from scipy.linalg.cython_lapack cimport zheevr, cheevr, dgetrf, dgetri, sgetrf, sgetri
 
 # SlothPy
 # Copyright (C) 2023 Mikolaj Tadeusz Zychowicz (MTZ)
@@ -35,6 +37,7 @@ from scipy.linalg.cython_lapack cimport zheevr, cheevr
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _zheevr_lwork(int n, jobz ='N', range='A', int il=1, int iu=0, cnp.float64_t vl=-1e308, cnp.float64_t vu=1e308):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
@@ -101,6 +104,7 @@ def _zheevr_lwork(int n, jobz ='N', range='A', int il=1, int iu=0, cnp.float64_t
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _zheevr(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] a, int lwork, int lrwork, int liwork, jobz='N', range='A', int il=1, int iu=0, cnp.float64_t vl=-1e30, cnp.float64_t vu=0):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
@@ -161,6 +165,7 @@ def _zheevr(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] a, int lwork, 
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _zutmu(cnp.ndarray[cnp.complex128_t, ndim=2, mode="fortran"] U,
                           cnp.ndarray[cnp.complex128_t, ndim=2, mode="fortran"] M) -> cnp.ndarray[cnp.complex128_t]:
     cdef:
@@ -188,6 +193,7 @@ def _zutmu(cnp.ndarray[cnp.complex128_t, ndim=2, mode="fortran"] U,
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _zutmud(cnp.ndarray[cnp.complex128_t, ndim=2, mode="fortran"] U,
                           cnp.ndarray[cnp.complex128_t, ndim=2, mode="fortran"] M) -> cnp.ndarray[cnp.float64_t]:
     cdef:
@@ -216,6 +222,7 @@ def _zutmud(cnp.ndarray[cnp.complex128_t, ndim=2, mode="fortran"] U,
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _zdot3d(cnp.ndarray[cnp.complex128_t, ndim=3] M, cnp.ndarray[cnp.float64_t, ndim=1] V) -> cnp.ndarray[cnp.complex128_t]:
     cdef:
         int m = M.shape[1]
@@ -240,6 +247,7 @@ def _zdot3d(cnp.ndarray[cnp.complex128_t, ndim=3] M, cnp.ndarray[cnp.float64_t, 
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _zgemmt(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] M, cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] N) -> cnp.ndarray[cnp.complex128_t]:
     cdef:
         int m = M.shape[1]
@@ -261,6 +269,46 @@ def _zgemmt(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] M, cnp.ndarray
     return A
 
 
+def _zdetinv(cnp.ndarray[cnp.float64_t, ndim=2, mode='fortran'] A):
+    cdef:
+        int n = A.shape[0]
+        int lda = n
+        int lwork = -1
+        int info, i
+        int pivot_sign = 1
+        double det = 1.0
+        cnp.ndarray[int, ndim=1] ipiv = cnp.PyArray_EMPTY(1, [n], cnp.NPY_INT32, 1)
+        cnp.ndarray[cnp.float64_t, ndim=1] work_query = cnp.PyArray_EMPTY(1, [1], cnp.NPY_FLOAT64, 1)
+
+    dgetrf(&n, &n, &A[0,0], &lda, &ipiv[0], &info)
+    if info != 0:
+        raise ValueError("LU factorization failed or matrix is singular.")
+
+    for i in range(n):
+        if ipiv[i] != i+1:
+            pivot_sign = -pivot_sign
+        det *= A[i, i]
+
+    det *= pivot_sign
+
+    dgetri(&n, &A[0,0], &lda, &ipiv[0], &work_query[0], &lwork, &info)
+    if info != 0 and info != -12:
+        raise ValueError(f"Workspace query for dgetri failed (info={info}).")
+
+    cdef int opt_lwork = <int>work_query[0]
+
+    if opt_lwork < 1:
+        opt_lwork = n * 64
+    
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] work = cnp.PyArray_EMPTY(1, [opt_lwork], cnp.NPY_FLOAT64, 1)
+
+    dgetri(&n, &A[0,0], &lda, &ipiv[0], &work[0], &opt_lwork, &info)
+    if info != 0:
+        raise ValueError("Inversion failed. Matrix singular or ill-conditioned.")
+
+    return det, A
+
+
 ##################
 # Single precision
 ##################
@@ -270,6 +318,7 @@ def _zgemmt(cnp.ndarray[cnp.complex128_t, ndim=2, mode='fortran'] M, cnp.ndarray
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _cheevr_lwork(int n, jobz='N', range='A', int il=1, int iu=0, cnp.float32_t vl=-1e38, cnp.float32_t vu=1e38):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
@@ -336,6 +385,7 @@ def _cheevr_lwork(int n, jobz='N', range='A', int il=1, int iu=0, cnp.float32_t 
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _cheevr(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] a, int lwork, int lrwork, int liwork, jobz='N', range='A', int il=1, int iu=0, cnp.float32_t vl=-1e30, cnp.float32_t vu=0):
     cdef:
         char jobz_char = jobz.encode('ascii')[0]
@@ -397,6 +447,7 @@ def _cheevr(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] a, int lwork, i
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _cutmu(cnp.ndarray[cnp.complex64_t, ndim=2, mode="fortran"] U,
                           cnp.ndarray[cnp.complex64_t, ndim=2, mode="fortran"] M) -> cnp.ndarray[cnp.complex64_t]:
     cdef:
@@ -424,6 +475,7 @@ def _cutmu(cnp.ndarray[cnp.complex64_t, ndim=2, mode="fortran"] U,
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _cutmud(cnp.ndarray[cnp.complex64_t, ndim=2, mode="fortran"] U,
                           cnp.ndarray[cnp.complex64_t, ndim=2, mode="fortran"] M) -> cnp.ndarray[cnp.float32_t]:
     cdef:
@@ -452,6 +504,7 @@ def _cutmud(cnp.ndarray[cnp.complex64_t, ndim=2, mode="fortran"] U,
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _cdot3d(cnp.ndarray[cnp.complex64_t, ndim=3] M, cnp.ndarray[cnp.float32_t, ndim=1] V) -> cnp.ndarray[cnp.complex64_t]:
     cdef:
         int m = M.shape[1]
@@ -476,6 +529,7 @@ def _cdot3d(cnp.ndarray[cnp.complex64_t, ndim=3] M, cnp.ndarray[cnp.float32_t, n
 @wraparound(False)
 @boundscheck(False)
 @initializedcheck(False)
+@cdivision(True)
 def _cgemmt(cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] M, cnp.ndarray[cnp.complex64_t, ndim=2, mode='fortran'] N) -> cnp.ndarray[cnp.complex64_t]:
     cdef:
         int m = M.shape[1]

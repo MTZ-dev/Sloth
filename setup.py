@@ -22,6 +22,7 @@ setup(
             "boundscheck": False,
             "wraparound": False,
             "cdivision": True,
+            "nonecheck": False,
             "language_level": "3",
     }
         ),

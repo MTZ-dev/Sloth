@@ -22,15 +22,14 @@ from re import compile, search, findall, MULTILINE, IGNORECASE
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from subprocess import Popen, PIPE
-from functools import partial
 
 from h5py import File, string_dtype
-from numpy import ndarray, dtype, bytes_, asarray, zeros, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, min, int64, diag, asfortranarray
-from scipy.linalg import eigh
+from numpy import ndarray, dtype, bytes_, asarray, zeros, eye, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, asfortranarray, min, int64, float64
+from scipy.linalg import eigh, kron, block_diag
 
 from slothpy.core._slothpy_exceptions import SltReadError
 from slothpy.core._config import settings
-from slothpy._general_utilities._math_expresions import _central_finite_difference_stencil
+from slothpy._general_utilities._math_expresions import _central_finite_difference_stencil, _calculate_wavefunction_overlap_phase_correction
 from slothpy._general_utilities._constants import A_BOHR
 from slothpy.core._process_pool import _worker_wrapper
 
@@ -390,7 +389,7 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
         
         try:
             tmp_files = []
-            with ProcessPoolExecutor(number_processes) as executor:
+            with ProcessPoolExecutor(number_processes-1) as executor:
                 futures = []
                 for (dof_number, nx, ny, nz), disps in sorted_displacement_data.items():
                     for disp in disps:
@@ -408,14 +407,35 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
                             gbw_0 = out_filepath[:-3] + "gbw"
                             read_hamiltonian(out_filepath, tmp_0, "tmp", pt2, electric_dipole_momenta, ssc, True)
                             with File(tmp_0, 'r') as file:
-                                dim = file["tmp"].attrs["Total_orbitals"]
+                                tmp_gorup = file["tmp"]
+                                dim = tmp_gorup.attrs["Total_orbitals"]
+                                multiplicities_zero = tmp_gorup.attrs["Multiplicities"]
+                                spin_roots = 0
+                                for mult in multiplicities_zero:
+                                    spin_roots += mult * tmp_gorup[f"MULTIPLICITY_{mult}"]["ROOTS_CI_COEFFICIENTS"].shape[1]
                         else:
                             gbw_tmp = out_filepath[:-3] + "gbw"
                             tmp_files.append(join(dirpath, f"{dof_number}_{nx}_{ny}_{nz}_{disp}.tmp"))
                             args = [dirpath, out_filepath, pt2, electric_dipole_momenta, ssc, gbw_0, gbw_tmp, dim, tmp_0, dof_number, nx, ny, nz, disp, _orca_fragovl_path]
                             futures.append(executor.submit(_worker_wrapper, read_overlaps_hamiltonians, args, number_threads))
+
+                displacements_list = list(sorted_displacement_data.keys())
+                mch_overlap_matrix_derivative = zeros((len(displacements_list), spin_roots, spin_roots), dtype=settings.float, order='C')
+                difference_stencil = _central_finite_difference_stencil(1, displacement_number, step)
+
+                from slothpy.core._slt_file import SltGroup, SltHamiltonian
+
                 for completed_dof_disp in as_completed(futures):
-                    pass
+                    completed_file, multiplicities, dof_number, nx, ny, nz, displacement = completed_dof_disp.result()
+                    displacement_shift = displacement + displacement_number
+                    stencil_index = displacement_shift if displacement < 0 else displacement_shift - 1
+                    slt_group = SltGroup(completed_file, "tmp")
+                    slt_hamiltonian = SltHamiltonian(slt_group)
+                    with File(completed_file, 'r') as tmp_file:
+                        tmp_group = tmp_file["tmp"]
+                        mch_overlap_matrix_derivative[displacements_list.index((dof_number, nx, ny, nz))] += block_diag(*[kron(eye(mult), tmp_group[str(mult)]["OVERLAP"][:]) for mult in multiplicities]) * difference_stencil[stencil_index]
+                    #### soc_ssc_matrix, magnetic_momenta to groups
+                ### out of loop groups for derivative (without_displacements)
         finally:
             for tmp_file in tmp_files:
                 if exists(tmp_file):
@@ -729,12 +749,19 @@ def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], dim: int) ->
     return fragment_fragment_MO_overlap_matrix
 
 
-def _orca_process_overlap_mch_basis_hamiltonian(out_dir, out_filepath: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, gbw_zero_filepath:str, gbw_tmp_filepath: str, dim: int, zero_filepath: str, dof_number: int, nx: int, ny: int, nz: int, displacement_number: int, _orca_fragovl_filepath: str):
-    tmp_filepath = join(out_dir, f"{dof_number}_{nx}_{ny}_{nz}_{displacement_number}.tmp")
+def _orca_process_overlap_mch_basis_hamiltonian(out_dir, out_filepath: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, gbw_zero_filepath:str, gbw_tmp_filepath: str, dim: int, zero_filepath: str, dof_number: int, nx: int, ny: int, nz: int, displacement: int, _orca_fragovl_filepath: str):
+    tmp_filepath = join(out_dir, f"{dof_number}_{nx}_{ny}_{nz}_{displacement}.tmp")
     _orca_to_slt(out_filepath, tmp_filepath, "tmp", pt2, electric_dipole_momenta, ssc, True)
     
     process = Popen([_orca_fragovl_filepath, gbw_zero_filepath, gbw_tmp_filepath], stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True)
     fragment_fragment_MO_overlap_matrix = _orca_fragovl_reader(process.stdout, dim)
+
+    dtype=settings.float
+
+    if dtype == float64:
+        from slothpy._general_utilities._lapack import _zdetinv as _detinv
+    else:
+        from slothpy._general_utilities._lapack import _sdetinv as _detinv
 
     with File(tmp_filepath, 'r+') as tmp_file:
         tmp_group = tmp_file["tmp"]
@@ -742,37 +769,41 @@ def _orca_process_overlap_mch_basis_hamiltonian(out_dir, out_filepath: str, pt2:
         active_orbitals = tmp_group.attrs["Active_orbitals"]
         multiplicities = tmp_group.attrs["Multiplicities"]
 
-        inner_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[:inactive_orbitals, :inactive_orbitals])
-        active_right_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[:inactive_orbitals, inactive_orbitals:inactive_orbitals+active_orbitals])
-        active_left_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[inactive_orbitals:inactive_orbitals+active_orbitals, :inactive_orbitals])
-        active_active_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[inactive_orbitals:inactive_orbitals+active_orbitals, inactive_orbitals:inactive_orbitals+active_orbitals])
+        inner_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[:inactive_orbitals, :inactive_orbitals], dtype=dtype)
+        active_right_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[:inactive_orbitals, inactive_orbitals:inactive_orbitals+active_orbitals], dtype=dtype)
+        active_left_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[inactive_orbitals:inactive_orbitals+active_orbitals, :inactive_orbitals], dtype=dtype)
+        active_active_matrix = asfortranarray(fragment_fragment_MO_overlap_matrix[inactive_orbitals:inactive_orbitals+active_orbitals, inactive_orbitals:inactive_orbitals+active_orbitals], dtype=dtype)
+        
         del fragment_fragment_MO_overlap_matrix
+        
+        det_inner_matrix, inv_inner_matrix = _detinv(inner_matrix)
+        inv_active_right = inv_inner_matrix @ active_right_matrix
 
-        multiplicity_wavefunction_overlap_dict = {}
+        del inv_inner_matrix
+        del active_right_matrix
+
+        det_inner_matrix_sqr = det_inner_matrix**2
 
         for mult in multiplicities:
             with File(zero_filepath, 'r') as zero_file:
                 zero_tmp_group = zero_file["tmp"]
                 mult_group = zero_tmp_group[f"MULTIPLICITY_{mult}"]
-                zero_alpha_orbitals = mult_group["ALPHA_ORBITALS"]
-                zero_beta_orbitals = mult_group["BETA_ORBITALS"]
-                zero_ci_coefficients = mult_group["ROOTS_CI_COEFFICIENTS"]
+                zero_alpha_orbitals = mult_group["ALPHA_ORBITALS"][:]
+                zero_beta_orbitals = mult_group["BETA_ORBITALS"][:]
+                zero_ci_coefficients = mult_group["ROOTS_CI_COEFFICIENTS"].astype(dtype)[:]
 
             mult_group = tmp_group[f"MULTIPLICITY_{mult}"]
-            alpha_orbitals = mult_group["ALPHA_ORBITALS"]
-            beta_orbitals = mult_group["BETA_ORBITALS"]
-            ci_coefficients = mult_group["ROOTS_CI_COEFFICIENTS"]
+            alpha_orbitals = mult_group["ALPHA_ORBITALS"][:]
+            beta_orbitals = mult_group["BETA_ORBITALS"][:]
+            ci_coefficients = mult_group["ROOTS_CI_COEFFICIENTS"].astype(dtype)[:]
 
-            multiplicity_wavefunction_overlap_dict[mult] = _calculate_wavefunction_overlap_phase_correction(inner_matrix, active_right_matrix, active_left_matrix, active_active_matrix, zero_alpha_orbitals, zero_beta_orbitals, alpha_orbitals, beta_orbitals, zero_ci_coefficients, ci_coefficients)
+            overlap, phases = _calculate_wavefunction_overlap_phase_correction(det_inner_matrix_sqr, inv_active_right, active_left_matrix, active_active_matrix, zero_alpha_orbitals, zero_beta_orbitals, alpha_orbitals, beta_orbitals, zero_ci_coefficients, ci_coefficients)
 
-
-    # import matplotlib.pyplot as plt
-    # import numpy as np
-
-    # fig, ax = plt.subplots()
-    # cax = ax.imshow(fragment_fragment_MO_overlap_matrix, cmap='RdBu', vmin=-1, vmax=1)
-    # fig.colorbar(cax, ax=ax)
-    # plt.show()
+            mult_group = tmp_group.create_group(str(mult))
+            mult_group.create_dataset("OVERLAP", data=overlap, chunks=True)
+            mult_group.create_dataset("PHASES", data=phases, chunks=True)
+        
+    return tmp_filepath, multiplicities, dof_number, nx, ny, nz, displacement
 
 
 def _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath: str, gbw_path: str, dof: int, nx: int, ny: int, nz: int, displacement_number: int):

@@ -15,8 +15,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from math import factorial
-from numpy import ndarray, array, zeros, zeros_like, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, abs, round, mod, sqrt, min, max, power, int64 as np_int64, min as np_min, exp, pi
-from numpy.linalg import eigh, inv
+from numpy import ndarray, array, zeros, zeros_like, ascontiguousarray, arange, tile, ones, argsort, take_along_axis, where, diag, empty, abs, round, mod, sqrt, min, max, power, newaxis, int64 as np_int64, min as np_min, exp, pi
+from numpy.linalg import eigh, inv, det, svd
 from numba import jit, prange, types, int64, float32, float64, complex64, complex128
 from slothpy._general_utilities._constants import GE, MU_B_AU
 from slothpy.core._slothpy_exceptions import SltInputError
@@ -418,4 +418,27 @@ def _validate_and_compute_partition_product_and_magnetisation_sum(partition_arra
     _compute_products_and_sums(sorted_partition_array, sorted_momenta_array, partition_product, magnetisation_sum)
 
     return partition_product, magnetisation_sum
+
+
+def _calculate_wavefunction_overlap_phase_correction(det_inner_matrix_sqr: float, inv_active_right: ndarray, active_left_matrix: ndarray, active_active_matrix: ndarray, zero_alpha_orbitals: ndarray, zero_beta_orbitals: ndarray, alpha_orbitals: ndarray, beta_orbitals: ndarray, zero_ci_coefficients: ndarray, ci_coefficients: ndarray):
+    n = zero_alpha_orbitals.shape[0]
+    m = alpha_orbitals.shape[0]
+    result = empty((n, m), dtype=inv_active_right.dtype)
+
+    alpha = not (zero_alpha_orbitals.shape[1] == 0 or alpha_orbitals.shape[1] == 0)
+    beta = not (zero_beta_orbitals.shape[1] == 0 or beta_orbitals.shape[1] == 0)
+
+    for i in range(n):
+        for j in range(m):
+            alpha_det = det(active_active_matrix[zero_alpha_orbitals[i], alpha_orbitals[j]] - (active_left_matrix[zero_alpha_orbitals[i], :] @ inv_active_right[:, alpha_orbitals[j]])) if alpha else 1
+            beta_det = det(active_active_matrix[zero_beta_orbitals[i], beta_orbitals[j]] - (active_left_matrix[zero_beta_orbitals[i], :] @ inv_active_right[:, beta_orbitals[j]])) if beta else 1
+            result[i,j] = alpha_det * beta_det * det_inner_matrix_sqr
+
+    u, s, vt = svd(zero_ci_coefficients.T @ result @ ci_coefficients)
+    result = u @ vt
+
+    phases = where(diag(result) < 0, -1, 1)
+    result *= phases[newaxis, :]
+
+    return result, phases
 
