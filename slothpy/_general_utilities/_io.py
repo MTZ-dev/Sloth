@@ -324,6 +324,8 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
         else:
             raise ValueError("Currently the only suported format is 'ORCA'.")
 
+        energy_matrix_type = "SOC_SSC_MATRIX" if ssc else "SOC_MATRIX"
+
         dof_disp_out_files = glob(join(dirpath, "dof_*.out"))
         pattern_simple = compile(join(dirpath, r'dof_(-?\d+)_disp_(-?\d+)\.out'))
         pattern_extended = compile(join(dirpath, r'dof_(-?\d+)_nx_(-?\d+)_ny_(-?\d+)_nz_(-?\d+)_disp_(-?\d+)\.out'))
@@ -407,12 +409,15 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
                             gbw_0 = out_filepath[:-3] + "gbw"
                             read_hamiltonian(out_filepath, tmp_0, "tmp", pt2, electric_dipole_momenta, ssc, True)
                             with File(tmp_0, 'r') as file:
-                                tmp_gorup = file["tmp"]
-                                dim = tmp_gorup.attrs["Total_orbitals"]
-                                multiplicities_zero = tmp_gorup.attrs["Multiplicities"]
+                                tmp_group = file["tmp"]
+                                dim = tmp_group.attrs["Total_orbitals"]
+                                multiplicities_zero = tmp_group.attrs["Multiplicities"]
+                                roots = []
                                 spin_roots = 0
                                 for mult in multiplicities_zero:
-                                    spin_roots += mult * tmp_gorup[f"MULTIPLICITY_{mult}"]["ROOTS_CI_COEFFICIENTS"].shape[1]
+                                    root_number = tmp_group[f"MULTIPLICITY_{mult}"]["ROOTS_CI_COEFFICIENTS"].shape[1]
+                                    roots.append(root_number)
+                                    spin_roots += mult * root_number
                         else:
                             gbw_tmp = out_filepath[:-3] + "gbw"
                             tmp_files.append(join(dirpath, f"{dof_number}_{nx}_{ny}_{nz}_{disp}.tmp"))
@@ -420,22 +425,39 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
                             futures.append(executor.submit(_worker_wrapper, read_overlaps_hamiltonians, args, number_threads))
 
                 displacements_list = list(sorted_displacement_data.keys())
-                mch_overlap_matrix_derivative = zeros((len(displacements_list), spin_roots, spin_roots), dtype=settings.float, order='C')
+                number_of_displacements = len(displacements_list)
+                mch_overlap_matrix_derivative_list = [zeros((number_of_displacements, root, root), dtype=settings.float, order='C') for root in roots]
                 difference_stencil = _central_finite_difference_stencil(1, displacement_number, step)
 
                 from slothpy.core._slt_file import SltGroup, SltHamiltonian
 
-                for completed_dof_disp in as_completed(futures):
-                    completed_file, multiplicities, dof_number, nx, ny, nz, displacement = completed_dof_disp.result()
-                    displacement_shift = displacement + displacement_number
-                    stencil_index = displacement_shift if displacement < 0 else displacement_shift - 1
-                    slt_group = SltGroup(completed_file, "tmp")
-                    slt_hamiltonian = SltHamiltonian(slt_group)
-                    with File(completed_file, 'r') as tmp_file:
-                        tmp_group = tmp_file["tmp"]
-                        mch_overlap_matrix_derivative[displacements_list.index((dof_number, nx, ny, nz))] += block_diag(*[kron(eye(mult), tmp_group[str(mult)]["OVERLAP"][:]) for mult in multiplicities]) * difference_stencil[stencil_index]
-                    #### soc_ssc_matrix, magnetic_momenta to groups
-                ### out of loop groups for derivative (without_displacements)
+                with File(f"{slt_filepath}", "a") as slt:
+                    group = slt[group_name]
+                    for completed_dof_disp in as_completed(futures):
+                        completed_file, multiplicities, dof_number, nx, ny, nz, displacement = completed_dof_disp.result()
+                        displacement_shift = displacement + displacement_number
+                        stencil_index = displacement_shift if displacement < 0 else displacement_shift - 1
+                        slt_group_hamiltonian = SltGroup(completed_file, "tmp")
+                        with File(completed_file, 'r') as tmp_file:
+                            tmp_group = tmp_file["tmp"]
+                            for index, mult in enumerate(multiplicities):
+                                mch_overlap_matrix_derivative_list[index][displacements_list.index((dof_number, nx, ny, nz))] += tmp_group[str(mult)]["OVERLAP"][:] * difference_stencil[stencil_index]
+                            slt_group = group.create_group(f"{dof_number}_{nx}_{ny}_{nz}_{displacement}")
+                            slt_group.create_dataset("HAMILTONIAN_MATRIX", data=tmp_group[energy_matrix_type][:], chunks=True)
+                            slt_group.create_dataset("MAGNETIC_DIPOLE_MOMENTA", data=slt_group_hamiltonian.magnetic_dipole_momentum_matrices().eval(), chunks=True)
+                            #####################################################################
+                            ################# PHASES CORRECTION HERE ############################
+                            #####################################################################
+
+                            # remove files instantly, time it or at leas tqdm and tqdm to slothpy requirements
+                    mch_overlap_matrix_derivative = zeros((number_of_displacements, spin_roots, spin_roots), dtype=settings.float, order='C')
+
+                    for d in range(number_of_displacements):
+                        mch_overlap_matrix_derivative[d] += block_diag(*[kron(eye(mult), overlap[d]) for mult, overlap in zip(multiplicities, mch_overlap_matrix_derivative_list)])
+                    
+                    for index, displacement_info in enumerate(displacements_list):
+                        slt_group = group.create_dataset(f"{displacement_info[0]}_{displacement_info[1]}_{displacement_info[2]}_{displacement_info[3]}", data=mch_overlap_matrix_derivative[index], chunks=True)
+
         finally:
             for tmp_file in tmp_files:
                 if exists(tmp_file):
@@ -444,10 +466,6 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
                     except Exception as e:
                         print(f"Error removing {file} file. You must do it manually.")
                         raise
-
-            # hamiltonian_derivative_matrix, displacements_phase_corrections = _hamiltonian_derivatives_matrix_in_ci_basis(slt_filepath, dirpath, dof_number, nx, ny, nz, displacement_number, step)
-
-            # Here save hamiltonian matrix in a group dof_nx_ny_nz (without disp that was used) and apply phase corrections for all matrices in hdf5 groups
 
     except Exception as exc:
         raise SltReadError(slt_filepath, exc, f"Failed to load Hamiltonian derivatives from directory '{dirpath}'")
