@@ -16,17 +16,17 @@
 
 from numpy import zeros, kron, eye
 from numpy import int64
-from numba import jit, types, prange, complex128, complex64, int64 as nb_int64
+from numba import jit, types, prange, complex128, complex64, float32, float64, int64 as nb_int64
 from slothpy.core._config import settings
 
-@jit([types.Array(complex64, 2, 'C')(types.Array(complex64, 2, 'C', True), nb_int64), types.Array(complex128, 2, 'C')(types.Array(complex128, 2, 'C', True), nb_int64)],
+@jit([types.Array(complex64, 2, 'C')(nb_int64, types.Array(complex64, 2, 'C', True)), types.Array(complex128, 2, 'C')(nb_int64, types.Array(complex128, 2, 'C', True)), types.Array(float32, 2, 'C')(nb_int64, types.Array(float32, 2, 'C', True)), types.Array(float64, 2, 'C')(nb_int64, types.Array(float64, 2, 'C', True))],
 nopython=True,
 nogil=True,
 cache=True,
 fastmath=True,
 parallel=True,
 )
-def _kron_A_N(A, N):
+def _kron_eye_N_A(N, A):
     n = A.shape[0]
     out = zeros((n * N, n * N), dtype=A.dtype)
     for i in prange(N):
@@ -41,8 +41,8 @@ def _kron_mult(ops):
     
     for op in ops[1:]:
         if isinstance(op, (int, int64)):
-            result = _kron_A_N(result, op)
+            result = _kron_eye_N_A(op, result)
         else:
-            result = kron(result, op)
+            result = kron(op, result)
     
     return result

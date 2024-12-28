@@ -24,13 +24,15 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from subprocess import Popen, PIPE
 
 from h5py import File, string_dtype
-from numpy import ndarray, dtype, bytes_, asarray, zeros, eye, empty, loadtxt, sum, reshape, mean, arange, transpose, fromstring, asfortranarray, min, int64, float64
-from scipy.linalg import eigh, kron, block_diag
+from numpy import ndarray, dtype, bytes_, asarray, zeros, concatenate, empty, loadtxt, sum, reshape, mean, arange, tile, transpose, fromstring, asfortranarray, min, int64, float64, newaxis
+from scipy.linalg import eigh, block_diag
+from tqdm import tqdm
 
 from slothpy.core._slothpy_exceptions import SltReadError
 from slothpy.core._config import settings
 from slothpy._general_utilities._math_expresions import _central_finite_difference_stencil, _calculate_wavefunction_overlap_phase_correction
 from slothpy._general_utilities._constants import A_BOHR
+from slothpy._general_utilities._direct_product_space import _kron_eye_N_A
 from slothpy.core._process_pool import _worker_wrapper
 
 #####################
@@ -228,7 +230,6 @@ def _orca_to_slt(orca_source: Union[str, Iterator], slt_filepath: str, group_nam
 
                 dataset = group.create_dataset(f"{matrix_type}", data=data, chunks = True)
                 dataset.attrs["Description"] = description
-
     finally:
         if should_close:
             file.close()
@@ -332,6 +333,8 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
 
         displacement_data = defaultdict(set)
 
+        print("Parsing output files in the directory...")
+
         for filename in dof_disp_out_files:
             match = pattern_simple.match(filename)
             if match:
@@ -388,10 +391,15 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
             raise ValueError("Output files for dof=0 not found in the directory.")
         
         sorted_displacement_data = {key: displacement_data[key] for key in sorted(displacement_data)}
+
+        print("Initializing process pool and processing DOF = 0 DISP = 0...")
+
+        from slothpy.core._slt_file import SltGroup
         
         try:
             tmp_files = []
-            with ProcessPoolExecutor(number_processes-1) as executor:
+            from_future_excepion = False
+            with ProcessPoolExecutor(number_processes) as executor:
                 futures = []
                 for (dof_number, nx, ny, nz), disps in sorted_displacement_data.items():
                     for disp in disps:
@@ -418,55 +426,94 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
                                     root_number = tmp_group[f"MULTIPLICITY_{mult}"]["ROOTS_CI_COEFFICIENTS"].shape[1]
                                     roots.append(root_number)
                                     spin_roots += mult * root_number
+                                with File(f"{slt_filepath}", "a") as slt:
+                                    group = slt[group_name]
+                                    slt_group_hamiltonian = SltGroup(tmp_0, "tmp")
+                                    slt_group = group.create_group(f"0")
+                                    slt_group.create_dataset("HAMILTONIAN_MATRIX", data=tmp_group[energy_matrix_type][:], chunks=True)
+                                    slt_group.create_dataset("MAGNETIC_DIPOLE_MOMENTA", data=slt_group_hamiltonian.magnetic_dipole_momentum_matrices().eval(), chunks=True)
+                                    if electric_dipole_momenta:
+                                        slt_group.create_dataset("ELECTRIC_DIPOLE_MOMENTA", data=slt_group_hamiltonian.electric_dipole_momentum_matrices().eval(), chunks=True)
                         else:
                             gbw_tmp = out_filepath[:-3] + "gbw"
                             tmp_files.append(join(dirpath, f"{dof_number}_{nx}_{ny}_{nz}_{disp}.tmp"))
                             args = [dirpath, out_filepath, pt2, electric_dipole_momenta, ssc, gbw_0, gbw_tmp, dim, tmp_0, dof_number, nx, ny, nz, disp, _orca_fragovl_path]
                             futures.append(executor.submit(_worker_wrapper, read_overlaps_hamiltonians, args, number_threads))
 
+                futures_len = len(futures)
                 displacements_list = list(sorted_displacement_data.keys())
                 number_of_displacements = len(displacements_list)
                 mch_overlap_matrix_derivative_list = [zeros((number_of_displacements, root, root), dtype=settings.float, order='C') for root in roots]
                 difference_stencil = _central_finite_difference_stencil(1, displacement_number, step)
+                
+                print("Calculating overlaps...")
 
-                from slothpy.core._slt_file import SltGroup, SltHamiltonian
+                progress_bar = tqdm(total=futures_len)
 
                 with File(f"{slt_filepath}", "a") as slt:
                     group = slt[group_name]
+
                     for completed_dof_disp in as_completed(futures):
+                        future_exception = completed_dof_disp.exception()
+                        if future_exception is not None:
+                            from_future_excepion = True
+                            print("Exception encountered! Waiting for all processes to finish...")
+                            for pid, process in executor._processes.items():
+                                process.terminate()
+                            executor.shutdown(wait=True, cancel_futures=True)
+                            raise future_exception
+
                         completed_file, multiplicities, dof_number, nx, ny, nz, displacement = completed_dof_disp.result()
                         displacement_shift = displacement + displacement_number
                         stencil_index = displacement_shift if displacement < 0 else displacement_shift - 1
                         slt_group_hamiltonian = SltGroup(completed_file, "tmp")
+                        phases_list = []
+
                         with File(completed_file, 'r') as tmp_file:
                             tmp_group = tmp_file["tmp"]
                             for index, mult in enumerate(multiplicities):
                                 mch_overlap_matrix_derivative_list[index][displacements_list.index((dof_number, nx, ny, nz))] += tmp_group[str(mult)]["OVERLAP"][:] * difference_stencil[stencil_index]
+                                phases_list.append(tile(tmp_group[str(mult)]["PHASES"][:], mult))
+                            phases = concatenate(phases_list)
                             slt_group = group.create_group(f"{dof_number}_{nx}_{ny}_{nz}_{displacement}")
-                            slt_group.create_dataset("HAMILTONIAN_MATRIX", data=tmp_group[energy_matrix_type][:], chunks=True)
-                            slt_group.create_dataset("MAGNETIC_DIPOLE_MOMENTA", data=slt_group_hamiltonian.magnetic_dipole_momentum_matrices().eval(), chunks=True)
-                            #####################################################################
-                            ################# PHASES CORRECTION HERE ############################
-                            #####################################################################
+                            slt_group.create_dataset("HAMILTONIAN_MATRIX", data=(tmp_group[energy_matrix_type][:]*phases[newaxis, :]), chunks=True)
+                            slt_group.create_dataset("MAGNETIC_DIPOLE_MOMENTA", data=(slt_group_hamiltonian.magnetic_dipole_momentum_matrices().eval()*phases[newaxis, :]), chunks=True)
+                            if electric_dipole_momenta:
+                                slt_group.create_dataset("ELECTRIC_DIPOLE_MOMENTA", data=(slt_group_hamiltonian.electric_dipole_momentum_matrices().eval()*phases[newaxis, :]), chunks=True)
 
-                            # remove files instantly, time it or at leas tqdm and tqdm to slothpy requirements
+                        if exists(completed_file):
+                            remove(completed_file)
+                        
+                        progress_bar.update(1)
+            
+                    progress_bar.close()
+
+                    print("Writing MCH overlap derivatives...")
+
                     mch_overlap_matrix_derivative = zeros((number_of_displacements, spin_roots, spin_roots), dtype=settings.float, order='C')
 
                     for d in range(number_of_displacements):
-                        mch_overlap_matrix_derivative[d] += block_diag(*[kron(eye(mult), overlap[d]) for mult, overlap in zip(multiplicities, mch_overlap_matrix_derivative_list)])
+                        mch_overlap_matrix_derivative[d] += block_diag(*[_kron_eye_N_A(mult, overlap[d]) for mult, overlap in zip(multiplicities, mch_overlap_matrix_derivative_list)])
                     
                     for index, displacement_info in enumerate(displacements_list):
                         slt_group = group.create_dataset(f"{displacement_info[0]}_{displacement_info[1]}_{displacement_info[2]}_{displacement_info[3]}", data=mch_overlap_matrix_derivative[index], chunks=True)
 
+                    print("Cleaning and terminating...")
+        except Exception as exc:
+            if not from_future_excepion:
+                print("Waiting for all processes to finish...")
+                for pid, process in executor._processes.items():
+                    process.terminate()
+                executor.shutdown(wait=True, cancel_futures=True)
+            raise
         finally:
             for tmp_file in tmp_files:
                 if exists(tmp_file):
                     try:
                         remove(tmp_file)
-                    except Exception as e:
+                    except Exception as exc:
                         print(f"Error removing {file} file. You must do it manually.")
                         raise
-
     except Exception as exc:
         raise SltReadError(slt_filepath, exc, f"Failed to load Hamiltonian derivatives from directory '{dirpath}'")
 
@@ -735,7 +782,7 @@ def _orca_matrix_reader(dim: int, number_of_whole_blocks: int, remaining_columns
     return matrix
 
 
-def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], dim: int) -> ndarray:
+def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], dim: int, a = None) -> ndarray:
     should_close = False
     if isinstance(orca_fragovl_source, str):
         file = open(orca_fragovl_source, "r")
@@ -759,7 +806,6 @@ def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], dim: int) ->
         fragment_B_MO_matrix = _orca_matrix_reader(dim, number_of_whole_blocks, remaining_columns, file, dtype, True)
 
         fragment_fragment_MO_overlap_matrix = fragment_A_MO_matrix.T @ fragment_fragment_matrix @ fragment_B_MO_matrix
-    
     finally:
         if should_close:
             file.close()
@@ -770,10 +816,9 @@ def _orca_fragovl_reader(orca_fragovl_source: Union[str, Iterator], dim: int) ->
 def _orca_process_overlap_mch_basis_hamiltonian(out_dir, out_filepath: str, pt2: bool, electric_dipole_momenta: bool, ssc: bool, gbw_zero_filepath:str, gbw_tmp_filepath: str, dim: int, zero_filepath: str, dof_number: int, nx: int, ny: int, nz: int, displacement: int, _orca_fragovl_filepath: str):
     tmp_filepath = join(out_dir, f"{dof_number}_{nx}_{ny}_{nz}_{displacement}.tmp")
     _orca_to_slt(out_filepath, tmp_filepath, "tmp", pt2, electric_dipole_momenta, ssc, True)
-    
-    process = Popen([_orca_fragovl_filepath, gbw_zero_filepath, gbw_tmp_filepath], stdout=PIPE, stderr=PIPE, bufsize=1, universal_newlines=True)
-    fragment_fragment_MO_overlap_matrix = _orca_fragovl_reader(process.stdout, dim)
 
+    process = Popen([_orca_fragovl_filepath, gbw_zero_filepath, gbw_tmp_filepath], stdout=PIPE, stderr=PIPE, bufsize=-1, universal_newlines=True)
+    fragment_fragment_MO_overlap_matrix = _orca_fragovl_reader(process.stdout, dim, gbw_tmp_filepath)
     dtype=settings.float
 
     if dtype == float64:
@@ -820,7 +865,7 @@ def _orca_process_overlap_mch_basis_hamiltonian(out_dir, out_filepath: str, pt2:
             mult_group = tmp_group.create_group(str(mult))
             mult_group.create_dataset("OVERLAP", data=overlap, chunks=True)
             mult_group.create_dataset("PHASES", data=phases, chunks=True)
-        
+
     return tmp_filepath, multiplicities, dof_number, nx, ny, nz, displacement
 
 
