@@ -641,7 +641,7 @@ class SltPropertyUnderMagneticField(_MultiProcessed):
     #_method_name = ...................................... (here I assume it depends)
     _method_type = "PROPERTY_UNDER_MAGNETIC_FIELD"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_mode", "_matrix", "_return_energies", "_energies", "_direction", "_magnetic_fields", "_orientations", "_number_of_states", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine", "_dims"]
+    __slots__ = _MultiProcessed.__slots__ + ["_mode", "_matrix", "_return_energies", "_energies", "_direction", "_magnetic_fields", "_orientations", "_number_of_states", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine", "_dims", "_slt_hamiltonian"]
 
     def __init__(self, slt_group,
         mode: Union[Literal["s", "l", "p", "j", "m"], str],
@@ -769,7 +769,7 @@ class SltZeemanSplitting(_MultiProcessed):
     _method_name = "Zeeman Splitting"
     _method_type = "ZEEMAN_SPLITTING"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_magnetic_fields", "_orientations", "_number_of_states", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine"]
+    __slots__ = _MultiProcessed.__slots__ + ["_magnetic_fields", "_orientations", "_number_of_states", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine" , "_slt_hamiltonian"]
      
     def __init__(self, slt_hamiltonian, ####### Teraz slt_group i argumenty boezposrednio przekazywane (zmień całość tutaj i w magnetyzacji)
         magnetic_fields: ndarray, ########################## Also slt.hamiltonian.info is removed from create jobs from first entry so probably move it into args!!!!!!!!!!!!!!
@@ -845,7 +845,7 @@ class SltMagnetisation(_MultiProcessed):
     _method_name = "Magnetisation"
     _method_type = "MAGNETISATION"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_magnetic_fields", "_orientations", "_temperatures", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine"]
+    __slots__ = _MultiProcessed.__slots__ + ["_magnetic_fields", "_orientations", "_temperatures", "_states_cutoff", "_rotation", "_electric_field_vector", "_hyperfine", "_slt_hamiltonian"]
      
     def __init__(self, slt_group,
         magnetic_fields: ndarray,

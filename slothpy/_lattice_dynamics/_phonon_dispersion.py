@@ -14,13 +14,13 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from numpy import asarray, where, sqrt, abs
+from numpy import asarray
 
 from slothpy.core._system import SharedMemoryArrayInfo, _load_shared_memory_arrays
 from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import AU_BOHR_CM_1
 
-def _phonon_dispersion_proxy(sm_arrays_info_list: list[SharedMemoryArrayInfo], args_list, process_index, start: int, end: int):
+def _phonon_dispersion_proxy(sm_arrays_info_list: list[SharedMemoryArrayInfo], args_list, process_index: int, start: int, end: int):
     hessian_object = Hessian(sm_arrays_info_list[:2], start_mode=args_list[0], stop_mode=args_list[1], eigen_range="I")
     sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list[2:])
     kpoints, progress_array, dispersion_array = arrays

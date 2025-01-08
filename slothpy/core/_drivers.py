@@ -25,6 +25,7 @@ from multiprocessing import Event as terminate_event
 from time import perf_counter_ns, sleep
 from datetime import datetime
 from signal import SIGINT, SIGTERM
+from functools import wraps
 
 from threadpoolctl import threadpool_limits
 from numba import set_num_threads
@@ -42,6 +43,7 @@ from slothpy._general_utilities._utils import _convert_seconds_dd_hh_mm_ss
 from slothpy._gui._monitor_gui import _run_monitor_gui
 
 def ensure_ready(func):
+    @wraps(func)
     def wrapper(self, *args, **kwargs):
         if not self._ready:
             self.run()
@@ -178,13 +180,13 @@ class _MultiProcessed(_SingleProcessed):
         self._autotune_from_run = False
         self._smm = smm
         self._sm = []
-        self._sm_arrays_info = []
-        self._sm_progress_array_info = None
-        self._sm_result_info = None
+        # self._sm_arrays_info = []
+        # self._sm_progress_array_info = None
+        # self._sm_result_info = None
         self._terminate_event = terminate_event
         self._returns = False
-        self._args_arrays = []
-        self._args = ()
+        # self._args_arrays = []
+        self._args = {}
         self._result_shape = None
         self._transpose_result = None
         self._additional_result = False

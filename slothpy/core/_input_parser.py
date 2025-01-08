@@ -126,10 +126,9 @@ def validate_input(func):
                             else:
                                 raise ValueError("The orientations' array must be (n,3) in the form: [[direction_x, direction_y, direction_z],...] or (n,4) array in the form: [[direction_x, direction_y, direction_z, weight],...] for powder-averaging (or integer from 0-11).")
                     case "states_cutoff":
-                        if slt_group.attributes["Kind"] == "SLOTHPY": ################################################ slt_group.type == "EXCHANGE_HAMILTONIAN"
+                        if slt_group.attributes["Kind"] == "SLOTHPY": #  EXCHANGE_HAMILTONIAN here
                             if value != [0, "auto"]:
                                 warn("State cutoff was modified, but it has no impact on the SlothPy user-defined Hamiltonian.", SltWarning)
-                            continue
                         if not isinstance(value, list) or len(value) != 2:
                             raise ValueError("The states' cutoff must be a Python's list of length 2.")
                         if value[0] == 0:
@@ -137,18 +136,25 @@ def validate_input(func):
                         elif not isinstance(value[0], (int, int32, int64)) or value[0] < 0:
                             raise ValueError(f"The states' cutoff must be a nonnegative integer less than or equal to the overall number of available states: {slt_group.attributes['States']} (or 0 for all the states).")
                         elif value[0] > slt_group.attributes["States"]:
-                            raise ValueError(f"Set the states' cutoff to a nonnegative integer less than or equal to the overall number of available states: {slt_group.attributes['States']} (or 0 for all the states).")
+                            raise ValueError("Set the states' cutoff to a nonnegative integer less than or equal to the overall number of available states: {slt_group.attributes['States']} (or 0 for all the states).")
                         if value[1] == 0:
                             value[1] = value[0]
-                        if value[1] == "auto":
-                            if "number_of_states" in bound_args.arguments.keys() and bound_args.arguments["number_of_states"] == 0:
+                        elif value[1] == "auto":
+                            if "number_of_states" in bound_args.arguments and bound_args.arguments["number_of_states"] == 0:
                                 value[1] = value[0]
-                            elif "number_of_states" in bound_args.arguments.keys() and isinstance(bound_args.arguments["number_of_states"], (int, int32, int64)) and bound_args.arguments["number_of_states"] <= value[0]:
+                            elif "number_of_states" in bound_args.arguments and isinstance(bound_args.arguments["number_of_states"], (int, int32, int64)) and bound_args.arguments["number_of_states"] <= value[0]:
                                 value[1] = bound_args.arguments["number_of_states"]
-                            if "temperatures" in bound_args.arguments.keys():
+                            if "temperatures" in bound_args.arguments:
                                 value[1] = settings.float(max(bound_args.arguments["temperatures"]) * KB * -log(1e-16 if settings.precision == "double" else 1e-8))
-                        elif not isinstance(value[1], (int, int32, int64)) or value[1] < 0 or value[1] > value[0]:
-                            raise ValueError("Set the second entry of states' cutoff to a nonnegative integer less or equal to the first entry or 0 for all the states from the first entry or 'auto' to let the SlothPy decide on a suitable cutoff.")
+                        if_rise = False
+                        if isinstance(value[1], (int, int32, int64)):
+                            if value[1] < 0 or value[1] > value[0]:
+                                if_rise = True       
+                        else:
+                            if value[1] < 0:
+                                if_rise = True
+                        if if_rise:
+                            raise ValueError("Set the second entry of states' cutoff to a nonnegative integer less or equal to the first entry, or 0 for all the states from the first entry, or 'auto' to let the SlothPy decide on a suitable cutoff.")
                     case "number_of_states":
                         if not isinstance(value, (int, int32, int64)) or value < 0:
                             raise ValueError("The number of states must be a positive integer or 0 for all of the calculated states.")

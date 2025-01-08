@@ -392,7 +392,7 @@ def _hamiltonian_derivatives_from_dir_to_slt(dirpath: str, slt_filepath: str, gr
         
         sorted_displacement_data = {key: displacement_data[key] for key in sorted(displacement_data)}
 
-        print("Initializing process pool and processing DOF = 0 DISP = 0...")
+        print("Initializing process pool and processing DOF=0 DISP=0...")
 
         from slothpy.core._slt_file import SltGroup
         

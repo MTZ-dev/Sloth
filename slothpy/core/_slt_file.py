@@ -501,6 +501,16 @@ class SltGroup(metaclass=MethodDelegateMeta):
 
     def to_xyz(self, xyz_filepath: str, hese: int, *args, **kwargs): pass
 
+    def save(self, slt_save: str): pass
+
+    def autotune(self, timeout: float = float("inf"), max_processes: int = 4096): pass
+
+    def run(self): pass
+
+    def eval(self): pass
+
+    def clear(self): pass
+
     def show_bandpath(self, brillouin_zone_path: str = None, npoints: int = None, density: float = None, special_points: Mapping[str, Sequence[float]] = None, symmetry_eps: float = 2e-4) -> None: pass
 
     def replace_atoms(self, atom_indices: List[int], new_symbols: List[str]) -> None:
@@ -1277,12 +1287,13 @@ class SltGroup(metaclass=MethodDelegateMeta):
 class SltHamiltonian(metaclass=MethodTypeMeta): # here you can only leave *args and *kwargs in arguments
     _method_type = "HAMILTONIAN"
 
-    __slots__ = ["_slt_group", "_states"]
+    __slots__ = ["_slt_group"]
 
     def __init__(self, slt_group: SltGroup, states_cutoff=[0,0], rotation=None, hyperfine=None, local_states=True) -> None: ### w sumie tutaj tez moze byc modyfikowanie parametrow jak z delayed methods bedziesz robil SltHamiltonian() z init i lepiej bo nie idzie przez delegowanie i input parser
         self._slt_group: str = slt_group
+        self._mode: str = None # "eslpjm" #Here mode must be also present as in ExchangeHamiltonian
     
-    def _slt_hamiltonian_from_slt_group(self, states_cutoff=[0,0], rotation=None, hyperfine=None, local_states=True) -> SltHamiltonian : pass
+    def _slt_hamiltonian_from_slt_group(self, states_cutoff=[0,0], rotation=None, hyperfine=None, local_states=True) -> SltHamiltonian : pass #mode
     ####################### Implement THIS!!!!!!!!!!!!!! ################### to include generation for methods and rotation (without local states or keep them to have the same calling convention in methods)
     # then also the following methods must be implmented to return packed data for methods to shared memory
 
@@ -1827,7 +1838,7 @@ class SltSuperCell(SltUnitCell):
 class SltHessian(SltSuperCell):
     _method_type = "HESSIAN"
 
-    __slots__ = SltXyz.__slots__ + ["_bandpath"]
+    __slots__ = SltSuperCell.__slots__ + ["_bandpath"]
 
     def __init__(self, slt_group) -> None:
         super().__init__(slt_group)
