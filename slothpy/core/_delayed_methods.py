@@ -19,7 +19,7 @@ from typing import Literal, Union, Optional
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.synchronize import Event
 
-from numpy import ndarray, asarray, outer, zeros, empty, histogram, diff, linspace, sign, sqrt, min, max, log
+from numpy import ndarray, asarray, asfortranarray, outer, zeros, empty, histogram, diff, linspace, sign, sqrt, min, max, log
 from pandas import DataFrame
 import matplotlib.pyplot as plt
 from ase.dft.kpoints import BandPath
@@ -539,18 +539,17 @@ class SltPhononFrequencies(_SingleProcessed):
     _method_name = "Phonon Frequencies"
     _method_type = "PHONON_FREQUENCIES"
 
-    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_kpoint", "_start_mode", "_stop_mode"]
+    __slots__ = _SingleProcessed.__slots__ + ["_slt_hessian", "_kpoint", "_start_mode", "_stop_mode"]
      
-    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarray, start_mode: int, stop_mode: int, slt_save: str = None) -> None:
+    def __init__(self, slt_group, slt_hessian, kpoint: ndarray, start_mode: int, stop_mode: int, slt_save: str = None) -> None:
         super().__init__(slt_group, slt_save)
-        self._hessian = hessian
-        self._masses_inv_sqrt = masses_inv_sqrt
+        self._slt_hessian = slt_hessian
         self._kpoint = kpoint
         self._start_mode = start_mode
         self._stop_mode = stop_mode
 
     def _executor(self):
-        return _phonon_frequencies(self._hessian, self._masses_inv_sqrt, self._kpoint, self._start_mode, self._stop_mode)
+        return _phonon_frequencies(self._slt_hessian.hesian()[:], self._slt_hessian._masses_inv_sqrt, self._kpoint, self._start_mode, self._stop_mode)
 
     def _save(self):
         self._metadata_dict = {
@@ -578,13 +577,11 @@ class SltIrSpectrum(_SingleProcessed):
     _method_name = "IR Spectrum"
     _method_type = "IR_SPECTRUM"
 
-    __slots__ = _SingleProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_born_charges", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
+    __slots__ = _SingleProcessed.__slots__ + ["_slt_hessian", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
      
-    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
+    def __init__(self, slt_group, slt_hessian, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, resolution: int = None, fwhm: float = None, slt_save: str = None) -> None:
         super().__init__(slt_group, slt_save)
-        self._hessian = hessian
-        self._masses_inv_sqrt = masses_inv_sqrt
-        self._born_charges = born_charges
+        self._slt_hessian = slt_hessian
         self._start_wavenumber = start_wavenumber
         self._stop_wavenumber = stop_wavenumber
         self._convolution = convolution
@@ -592,7 +589,7 @@ class SltIrSpectrum(_SingleProcessed):
         self._fwhm = fwhm
 
     def _executor(self):
-        return _ir_spectrum(self._hessian, self._masses_inv_sqrt, self._born_charges, self._start_wavenumber, self._stop_wavenumber, self._convolution, self._resolution, self._fwhm)
+        return _ir_spectrum(self._slt_hessian.hessian()[:], self._slt_hessian._masses_inv_sqrt, asfortranarray(self._slt_hessian.born_charges()[:], dtype=settings.complex), self._start_wavenumber, self._stop_wavenumber, self._convolution, self._resolution, self._fwhm)
 
     def _save(self):
         self._metadata_dict = {
@@ -615,7 +612,7 @@ class SltIrSpectrum(_SingleProcessed):
             self._result = (self._slt_group["INTENSITIES"][:], self._slt_group["CONVOLUTION"][:])
 
     #TODO: plot
-    def _plot(self):
+    def _plot(self, *args, **kwargs):
         # You can add info about FWHM which I left in the attributes
         # This works only for the convolution calculation
         plt.figure(figsize=(8, 6))
@@ -696,8 +693,8 @@ class SltPropertyUnderMagneticField(_MultiProcessed):
     def __repr__(self):
         return f"<{RED}Slt{self._mode.upper()}UnderMagneticField{RESET} object from {BLUE}Group{RESET} '{self._group_name}' {GREEN}File{RESET} '{self._hdf5}'.>"
     
-    def _load_args_arrays(self):
-        self._args_arrays = [*self._slt_hamiltonian.arrays_to_shared_memory, self._magnetic_fields, self._orientations, self._energies] # additional result must be the last
+    def _load_args_arrays(self): ###########################!!!!! Here you must implement as in SltHessian, SLtHamiltonian.to_shared_memory returning sm_array_info_list and sm for arrays, append sm to self._sm, and load sm inside Hamiltonian, use good mode on the hamilotnian etc.
+        self._args_arrays = [*self._slt_hamiltonian.arrays_to_shared_memory, self._magnetic_fields, self._orientations, self._energies] # additional_result must be the last ########### this is dumb, you can put addtional_result now in self._kwargs but its better to just return it in new method _return !!!!!!!!!!!!!!!!!!!
         if not self._returns:
             self._result = empty((len(self._mode), self._magnetic_fields.shape[0] * self._orientations.shape[0], *self._dims), dtype=settings.complex if self._full_matrix else settings.float, order="C")
             self._result_shape = (len(self._mode), self._orientations.shape[0], self._magnetic_fields.shape[0], *self._dims)
@@ -801,7 +798,7 @@ class SltZeemanSplitting(_MultiProcessed):
         self._slt_hamiltonian = slt_hamiltonian._slt_hamiltonian_from_slt_group(self._states_cutoff, self._rotation, self._hyperfine, False) ######## This should be at least renamed to set rotation or something like this
         self._slt_hamiltonian._mode = "em" if electric_field_vector is None else "emp"
     
-    def _load_args_arrays(self):
+    def _load_args_arrays(self): ######################### kwargs
         self._args_arrays = [*self._slt_hamiltonian.arrays_to_shared_memory, self._magnetic_fields, self._orientations]
         if not self._returns:
             self._result = empty((self._magnetic_fields.shape[0] * self._orientations.shape[0], self._number_of_states), dtype=self._magnetic_fields.dtype, order="C")
@@ -877,7 +874,7 @@ class SltMagnetisation(_MultiProcessed):
         self._slt_hamiltonian = self._slt_group._slt_hamiltonian_from_slt_group(self._states_cutoff, self._rotation, self._hyperfine, True)
         self._slt_hamiltonian._mode = "em" if electric_field_vector is None else "emp"
     
-    def _load_args_arrays(self):
+    def _load_args_arrays(self): ######################### kwargs
         self._args_arrays = [*self._slt_hamiltonian.arrays_to_shared_memory, self._magnetic_fields, self._orientations, self._temperatures]
         if not self._returns:
             self._result = empty((self._magnetic_fields.shape[0] * self._orientations.shape[0], self._temperatures.shape[0]), dtype=self._magnetic_fields.dtype, order="C")
@@ -922,26 +919,30 @@ class SltPhononDispersion(_MultiProcessed):
     _method_name = "Phonon Dispersion"
     _method_type = "PHONON_DISPERSION"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_kpts", "_masses_inv_sqrt", "_bandpath", "_start_mode", "_stop_mode", "_x", "_x_coords", "_x_labels"]
+    __slots__ = _MultiProcessed.__slots__ + ["_slt_hessian", "_kpoints", "_bandpath", "_start_mode", "_stop_mode", "_x", "_x_coords", "_x_labels"]
  
-    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, bandpath: BandPath, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
+    def __init__(self, slt_group, slt_hessian, bandpath: BandPath, start_mode: int = 0, stop_mode: int = 0, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
         super().__init__(slt_group, len(bandpath.kpts), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
-        self._hessian = hessian
-        self._masses_inv_sqrt = masses_inv_sqrt
+        self._slt_hessian = slt_hessian
         self._bandpath = bandpath
-        self._kpts = bandpath.kpts.astype(settings.float)
+        self._kpoints = bandpath.kpts.astype(settings.float)
         self._x, self._x_coords, self._x_labels = bandpath.get_linear_kpoint_axis()
         self._start_mode = start_mode
         self._stop_mode = stop_mode
-        self._args = [self._start_mode, self._stop_mode]
         self._executor_proxy = _phonon_dispersion_proxy
 
-    def _load_args_arrays(self):
-        self._args_arrays = [self._hessian, outer(self._masses_inv_sqrt, self._masses_inv_sqrt), self._kpts]
-        self._result = empty((len(self._x), self._stop_mode - self._start_mode), dtype=settings.float, order="C")
+    def _load_kwargs(self):
+        self._kwargs = {
+            "hessian": self._slt_hessian.hessian()[:],
+            "masses_inv_sqrt": outer(self._slt_hessian._masses_inv_sqrt, self._slt_hessian._masses_inv_sqrt),
+            "kpoints": self._kpoints,
+            "start_mode": self._start_mode,
+            "stop_mode": self._stop_mode,
+            "result_array": empty((len(self._x), self._stop_mode - self._start_mode), dtype=settings.float, order="C")
+        }
 
     def _return(self):
-        return self._x, self._x_coords, self._x_labels, self._kpts, self._result
+        return self._x, self._x_coords, self._x_labels, self._kpoints, self._result
 
     def _save(self):
         self._metadata_dict = {
@@ -954,7 +955,7 @@ class SltPhononDispersion(_MultiProcessed):
             "X": (self._x, "Dataset containing X coordinates for the dispersion plotting."),
             "X_COORDS": (self._x_coords, "Dataset containing X coordinates of the special point labels."),
             "X_LABELS": (self._x_labels, "Dataset containing the special point labels."),
-            "KPTS_PATH": (self._kpts, "Dataset containing the k-point path in the fractional coordinates of the reciprocal lattice.")
+            "KPTS_PATH": (self._kpoints, "Dataset containing the k-point path in the fractional coordinates of the reciprocal lattice.")
         }
 
     def _load_from_slt_file(self):
@@ -962,7 +963,7 @@ class SltPhononDispersion(_MultiProcessed):
         self._x = self._slt_group["X"][:]
         self._x_coords = self._slt_group["X_COORDS"][:]
         self._x_labels = self._slt_group["X_LABELS"][:]
-        self._kpts = self._slt_group["KPTS_PATH"][:]
+        self._kpoints = self._slt_group["KPTS_PATH"][:]
 
     def _plot(self, **kwargs):
         plt.figure(figsize=(8, 6))
@@ -984,24 +985,28 @@ class SltPhononDensityOfStates(_MultiProcessed):
     _method_name = "Phonon Density of States"
     _method_type = "PHONON_DENSITY_OF_STATES"
 
-    __slots__ = _MultiProcessed.__slots__ + ["_hessian", "_masses_inv_sqrt", "_kpoints_grid", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
+    __slots__ = _MultiProcessed.__slots__ + ["_slt_hessian", "_kpoints_grid", "_start_wavenumber", "_stop_wavenumber", "_resolution", "_convolution", "_fwhm"]
      
-    def __init__(self, slt_group, hessian: ndarray, masses_inv_sqrt: ndarray, kpoints_grid: ndarray, start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = None, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
+    def __init__(self, slt_group, slt_hessian, kpoints_grid: ndarray, start_wavenumber: float, stop_wavenumber: float, resolution: int, convolution: Optional[Literal["lorentzian", "gaussian"]] = None, fwhm: float = None, number_cpu: int = 1, number_threads: int = 1, autotune: bool = False, slt_save: str = None, smm: SharedMemoryManager = None, terminate_event: Event = None) -> None:
         super().__init__(slt_group, len(kpoints_grid), number_cpu, number_threads, autotune, smm, terminate_event, slt_save)
-        self._hessian = hessian
-        self._masses_inv_sqrt = masses_inv_sqrt
+        self._slt_hessian = slt_hessian
         self._kpoints_grid = kpoints_grid
         self._start_wavenumber = start_wavenumber
         self._stop_wavenumber = stop_wavenumber
         self._convolution = convolution
         self._resolution = resolution
         self._fwhm = fwhm
-        self._args = [self._start_wavenumber, self._stop_wavenumber]
         self._executor_proxy = _phonon_density_of_states_proxy
         self._returns = True
 
-    def _load_args_arrays(self):
-        self._args_arrays = [self._hessian, outer(self._masses_inv_sqrt, self._masses_inv_sqrt), self._kpoints_grid]
+    def _load_kwargs(self):
+        self._kwargs = {
+            "hessian": self._slt_hessian.hessian()[:],
+            "masses_inv_sqrt": outer(self._slt_hessian._masses_inv_sqrt, self._slt_hessian._masses_inv_sqrt),
+            "kpoints_grid": self._kpoints_grid,
+            "start_frequency": self._start_wavenumber,
+            "stop_frequency": self._stop_wavenumber,
+            }
 
     def _gather_results(self, result_queue, number_processes):
         all_frequencies = []

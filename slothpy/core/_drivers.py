@@ -35,7 +35,7 @@ from pandas import DataFrame
 from slothpy.core._registry import MethodTypeMeta
 from slothpy.core._config import settings
 from slothpy.core._slothpy_exceptions import slothpy_exc_methods as slothpy_exc
-from slothpy.core._system import SltTemporarySignalHandler, _get_number_of_processes_threads, _to_shared_memory, _from_shared_memory, _distribute_chunks, _from_shared_memory_to_array, _dummy
+from slothpy.core._system import SltTemporarySignalHandler, SharedMemoryArrayInfo, _get_number_of_processes_threads, _to_shared_memory, _from_shared_memory, _distribute_chunks, _from_shared_memory_to_array, _dummy
 from slothpy.core._process_pool import SltProcessPool
 from slothpy._general_utilities._constants import RED, GREEN, BLUE, YELLOW, PURPLE, RESET
 from slothpy._general_utilities._io import _save_data_to_slt
@@ -167,7 +167,7 @@ class _SingleProcessed(ABC, metaclass=MethodTypeMeta):
 
 class _MultiProcessed(_SingleProcessed):
 
-    __slots__ = _SingleProcessed.__slots__ + ["_number_to_parallelize", "_number_cpu", "_number_processes", "_number_threads", "_executor_proxy", "_process_pool", "_autotune", "_autotune_from_run", "_smm", "_sm", "_sm_arrays_info", "_sm_progress_array_info",  "_sm_result_info", "_terminate_event", "_returns", "_args_arrays", "_args", "_result_shape", "_transpose_result", "_additional_result", "_additional_result_shape", "_benchmark_process", "_monitor"]
+    __slots__ = _SingleProcessed.__slots__ + ["_number_to_parallelize", "_number_cpu", "_number_processes", "_number_threads", "_executor_proxy", "_process_pool", "_autotune", "_autotune_from_run", "_smm", "_sm", "_terminate_event", "_returns", "_kwargs", "_result_shape", "_transpose_result", "_additional_result", "_additional_result_shape", "_benchmark_process", "_monitor"]
 
     @abstractmethod
     def __init__(self, slt_group, number_to_parallelize: int, number_cpu: int, number_threads: int, autotune: bool, smm: SharedMemoryManager = None, terminate_event: Event = None, slt_save: str = None) -> None:
@@ -180,19 +180,19 @@ class _MultiProcessed(_SingleProcessed):
         self._autotune_from_run = False
         self._smm = smm
         self._sm = []
-        # self._sm_arrays_info = []
-        # self._sm_progress_array_info = None
-        # self._sm_result_info = None
         self._terminate_event = terminate_event
         self._returns = False
-        # self._args_arrays = []
-        self._args = {}
+        self._kwargs = {}
         self._result_shape = None
         self._transpose_result = None
         self._additional_result = False
         self._additional_result_shape = ()
         self._benchmark_process = None
         self._monitor = None # This is here only until the GUI is ready
+
+    @abstractmethod
+    def _load_kwargs(self):
+        pass
 
     @contextmanager
     def _ensure_shared_memory_manager(self):
@@ -207,36 +207,26 @@ class _MultiProcessed(_SingleProcessed):
             yield
 
     def _create_shared_memory(self):
-        for array in self._args_arrays:
-            sm_info, sm = _to_shared_memory(self._smm, array)
-            self._sm.append(sm)
-            self._sm_arrays_info.append(sm_info)
-        self._args_arrays = []
-        self._sm_progress_array_info, sm = _to_shared_memory(self._smm, zeros((self._number_processes,), dtype=int64, order="C"))
-        self._sm.append(sm)
-        if not self._returns:
-            self._sm_result_info, sm = _to_shared_memory(self._smm, self._result)
-            self._sm.append(sm)
-            self._result = None
-        self._args_arrays = []
+        for name, arg in self._kwargs.items():
+            if isinstance(arg, ndarray):
+                sm_info, sm = _to_shared_memory(self._smm, arg)
+                self._sm.append(sm)
+                self._kwargs[name] = sm_info
+        sm_progress_array_info, sm = _to_shared_memory(self._smm, zeros((self._number_processes,), dtype=int64, order="C"))
+        self._kwargs["progress_array"] = sm_progress_array_info
     
     def _retrieve_arrays_and_results_from_shared_memory(self):
-        self._args_arrays = []
-        for sm_array_info in self._sm_arrays_info:
-            self._args_arrays.append(_from_shared_memory_to_array(sm_array_info))
-        if not self._returns:
-            self._result = _from_shared_memory_to_array(self._sm_result_info)
-
-    @abstractmethod
-    def _load_args_arrays():
-        pass
+        for name, arg in self._kwargs.items():
+            if isinstance(arg, SharedMemoryArrayInfo):
+                self._kwargs[name] = _from_shared_memory_to_array(arg)
 
     def _create_jobs(self):
-        sm_arrays_info_list = self._sm_arrays_info[:]
-        sm_arrays_info_list.append(self._sm_progress_array_info)
-        if not self._returns:
-            sm_arrays_info_list.append(self._sm_result_info) ######## From here I removed self._slt_hamiltonian.info in the first entry and self._returns from the last entry!!!!!!!!!
-        return [(sm_arrays_info_list, self._args, process_index, chunk.start, chunk.end) for process_index, chunk in enumerate(_distribute_chunks(self._number_to_parallelize, self._number_processes))]
+        for process_index, chunk in enumerate(_distribute_chunks(self._number_to_parallelize, self._number_processes)):
+            kwargs = self._kwargs.copy()
+            kwargs["process_index"] = process_index
+            kwargs["start"] = chunk.start
+            kwargs["end"] = chunk.end
+            yield kwargs
 
     def _gather_results(self, results_queue):
         pass
@@ -268,6 +258,39 @@ class _MultiProcessed(_SingleProcessed):
             exit(1)
 
     @slothpy_exc("SltCompError")
+    def run(self):
+        if not self._ready:
+            if self._autotune:
+                self._autotune_from_run = True
+                self.autotune()
+                self._autotune_from_run = False
+            else:
+                self._load_kwargs()
+            with ExitStack() as stack:
+                stack.enter_context(self._ensure_shared_memory_manager())
+                self._create_shared_memory()
+                if settings.monitor: # After gui is created this has to be removed from here and monitor should be called from the main gui process providing smm to the method for progress array
+                    self._monitor = Process(target=_run_monitor_gui, args=(self._kwargs["progress_array"], self._number_to_parallelize, self._number_processes, self._method_name))
+                    self._monitor.start()
+                with SltTemporarySignalHandler([SIGTERM, SIGINT], self._terminate_and_clear_monitor):
+                    result = self._executor()
+                    if self._monitor is not None:
+                        self._terminate_and_clear_monitor(keep_smm=True)
+                    if self._returns:
+                        self._result = result
+                    else:
+                        self._result = _from_shared_memory_to_array(self._kwargs["result_array"], reshape=self._result_shape if self._result_shape else None)
+                        if self._transpose_result is not None:
+                            self._result = self._result.transpose(self._transpose_result)
+                        if self._additional_result:
+                            setattr(self, self._additional_result, _from_shared_memory_to_array(self._kwargs["additional_result"], reshape=(self._additional_result_shape)))
+                    self._ready = True
+
+        if self._slt_save is not None:
+            self.save()
+        self._clean_sm_info_and_pool()
+
+    @slothpy_exc("SltCompError")
     def autotune(self, timeout: float = float("inf"), max_processes: int = 4096):
         if self._is_from_file:
             print(f"The {self.__class__.__name__} object was loaded from the .slt file. There is nothing to autotune.")
@@ -282,7 +305,7 @@ class _MultiProcessed(_SingleProcessed):
             result_tmp = self._result
         with ExitStack() as stack:
             stack.enter_context(self._ensure_shared_memory_manager())
-            self._load_args_arrays()
+            self._load_kwargs()
             self._create_shared_memory()
             for number_threads in range(min(64, self._number_cpu), 0, -1):
                 number_processes = self._number_cpu // number_threads
@@ -302,12 +325,12 @@ class _MultiProcessed(_SingleProcessed):
                     self._number_processes = number_processes
                     self._number_threads = number_threads
                     progress_array = zeros((number_processes,), dtype=int64, order="C")
-                    self._sm_progress_array_info, sm = _to_shared_memory(self._smm, progress_array)
+                    self._kwargs["progress_array"], sm = _to_shared_memory(self._smm, progress_array)
                     self._sm.append(sm)
                     self._terminate_event = terminate_event()
-                    self._process_pool = SltProcessPool(self._executor_proxy, self._create_jobs(), self._number_threads, self._returns, _dummy, self._terminate_event)
+                    self._process_pool = SltProcessPool(self._executor_proxy, list(self._create_jobs()), self._number_threads, self._returns, _dummy, self._terminate_event)
                     self._benchmark_process = Process(target=self._process_pool.start_and_collect)
-                    sm_progress, progress_array = _from_shared_memory(self._sm_progress_array_info)
+                    sm_progress, progress_array = _from_shared_memory(self._kwargs["progress_array"])
                     self._sm.append(sm_progress)
                     with SltTemporarySignalHandler([SIGTERM, SIGINT], self._terminate_and_clear_benchmark_process):
                         self._benchmark_process.start()
@@ -369,39 +392,6 @@ class _MultiProcessed(_SingleProcessed):
             self._autotune = False
     
     @slothpy_exc("SltCompError")
-    def run(self):
-        if not self._ready:
-            if self._autotune:
-                self._autotune_from_run = True
-                self.autotune()
-                self._autotune_from_run = False
-            else:
-                self._load_args_arrays()
-            with ExitStack() as stack:
-                stack.enter_context(self._ensure_shared_memory_manager())
-                self._create_shared_memory()
-                if settings.monitor: # After gui is created this has to be removed from here and monitor should be called from the main gui process providing smm to the method for progress array
-                    self._monitor = Process(target=_run_monitor_gui, args=(self._sm_progress_array_info, self._number_to_parallelize, self._number_processes, self._method_name))
-                    self._monitor.start()
-                with SltTemporarySignalHandler([SIGTERM, SIGINT], self._terminate_and_clear_monitor):
-                    result = self._executor()
-                    if self._monitor is not None:
-                        self._terminate_and_clear_monitor(keep_smm=True)
-                    if self._returns:
-                        self._result = result
-                    else:
-                        self._result = _from_shared_memory_to_array(self._sm_result_info, reshape=self._result_shape if self._result_shape else None)
-                        if self._transpose_result is not None:
-                            self._result = self._result.transpose(self._transpose_result)
-                        if self._additional_result:
-                            setattr(self, self._additional_result, _from_shared_memory_to_array(self._sm_arrays_info[-1], reshape=(self._additional_result_shape)))
-                    self._ready = True
-
-        if self._slt_save is not None:
-            self.save()
-        self._clean_sm_info_and_pool()
-    
-    @slothpy_exc("SltCompError")
     def clear(self):
         if self._is_from_file:
             print(f"The {self.__class__.__name__} object was loaded from the .slt file. It cannot be cleared.")
@@ -414,10 +404,7 @@ class _MultiProcessed(_SingleProcessed):
 
     def _clean_sm_info_and_pool(self):
         self._process_pool = None
-        self._sm_arrays_info = []
         self._sm = []
-        self._sm_progress_array_info = None
-        self._sm_result_info = None
 
 
 

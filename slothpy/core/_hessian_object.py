@@ -18,21 +18,15 @@ from typing import Literal
 
 from numpy import ndarray, finfo, empty, where, abs, sqrt, float64, float32, complex64, complex128
 
-from slothpy.core._system import SharedMemoryArrayInfo, _load_shared_memory_arrays
 from slothpy._general_utilities._numba_methods import _build_dynamical_matrix
 
 class Hessian():
     
     __slots__ = ["_sm", "_hessian", "_masses_inv_sqrt", "_kpoint", "_heevr_lwork", "_heevr", "_lwork", "_il", "_iu", "_vl", "_vu", "_range", "_dtype_array"]
 
-    def __init__(self, sm_arrays_info_list: list[SharedMemoryArrayInfo], kpoint: ndarray = None, start_mode: int = 0, stop_mode: int = 0, start_frequency: float = None, stop_frequency: float = None, single_process: bool = False, eigen_range: Literal["I", "V"] = "I"):
-        if single_process:
-            arrays = sm_arrays_info_list
-        else:
-            sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list)
-            self._sm = sm
-        self._hessian = arrays[0]
-        self._masses_inv_sqrt = arrays[1]
+    def __init__(self, hessian: ndarray, masses_inv_sqrt: ndarray, kpoint: ndarray = None, start_mode: int = 0, stop_mode: int = 0, start_frequency: float = None, stop_frequency: float = None, eigen_range: Literal["I", "V"] = "I"):
+        self._hessian = hessian
+        self._masses_inv_sqrt = masses_inv_sqrt
         self._kpoint = kpoint
         if self._hessian.dtype == float64:
             from slothpy._general_utilities._lapack import _zheevr_lwork as _heevr_lwork, _zheevr as _heevr

@@ -1,0 +1,5 @@
+1. Monitor and gui integration 9one instance of QT-app
+2. Hamiltonian self._load_args_arrays() to kwargs, and Hamiltonian to shared memory in SltHamiltonian for complicated list of arrays, load them in Hamiltonian class
+
+
+autotune self._load_args_arrays()

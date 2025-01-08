@@ -54,11 +54,11 @@ class SltProcessPool:
 
     def start_and_collect(self):
         with SltTemporarySignalHandler([signal.SIGTERM, signal.SIGINT], self.termiante_and_close_pool):
-            for job_args in self._jobs:
+            for job_kwargs in self._jobs:
                 if self._returns:
-                    process = Process(target=_worker_wrapper, args=(self._worker, job_args, self._number_threads, self._result_queue))
+                    process = Process(target=_worker_wrapper, args=(self._worker, job_kwargs, self._number_threads, self._result_queue))
                 else:
-                    process = Process(target=_worker_wrapper, args=(self._worker, job_args, self._number_threads))
+                    process = Process(target=_worker_wrapper, args=(self._worker, job_kwargs, self._number_threads))
                 process.start()
                 self._processes.append(process)
 
@@ -79,10 +79,13 @@ class SltProcessPool:
         return self._result
     
 
-def _worker_wrapper(worker, args, number_threads, result_queue=None):
+def _worker_wrapper(worker, kwargs, number_threads, result_queue=None):
     with threadpool_limits(limits=number_threads):
         set_num_threads(number_threads)
-        result = worker(*args)
+        if isinstance(kwargs, dict):
+            result = worker(**kwargs)
+        else:
+            result = worker(*kwargs)
     if result_queue is not None:
         result_queue.put(result)
 

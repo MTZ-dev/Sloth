@@ -16,9 +16,11 @@
 
 import sys
 import signal
+import inspect
 from os import cpu_count
 from multiprocessing.managers import SharedMemoryManager
 from multiprocessing.shared_memory import SharedMemory
+from functools import wraps
 
 from numpy import ndarray, dtype, array
 
@@ -82,6 +84,26 @@ def _from_shared_memory(sm_array_info: SharedMemoryArrayInfo):
 def _from_shared_memory_to_array(sm_array_info: SharedMemoryArrayInfo, reshape: tuple = None):
     sm = SharedMemory(sm_array_info.name)
     return array(ndarray(sm_array_info.shape if reshape is None else reshape, sm_array_info.dtype, sm.buf), copy=True, order="C")
+
+
+def shared_memory_proxy(func):
+    sm_list = []
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        signature = inspect.signature(func)
+        bound_args = signature.bind_partial(*args, **kwargs)
+        bound_args.apply_defaults()
+
+        for name, arg in bound_args.arguments.items():
+            if isinstance(arg, SharedMemoryArrayInfo):
+                sm, array = _from_shared_memory(arg)
+                sm_list.append(sm)
+                bound_args.arguments[name] = array
+
+        return func(**bound_args.arguments)
+
+    return wrapper
 
 
 class ChunkInfo:

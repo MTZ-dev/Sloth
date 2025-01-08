@@ -26,7 +26,7 @@ from slothpy._general_utilities._math_expresions import _convolve_gaussian_xyz, 
 def _ir_spectrum(hessian: ndarray, masses_inv_sqrt: ndarray, born_charges: ndarray, start_wavenumber: float, stop_wavenumber: float, convolution: Optional[Literal["lorentzian", "gaussian"]] = "lorentizan", resolution: int = None, fwhm: float = None):
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=hessian.dtype)
 
-    hessian_object = Hessian([hessian, outer(masses_inv_sqrt, masses_inv_sqrt)], kpoint=asarray([0., 0., 0.], dtype=hessian.dtype), start_frequency=start_wavenumber, stop_frequency=stop_wavenumber, single_process=True, eigen_range="V")
+    hessian_object = Hessian(hessian, outer(masses_inv_sqrt, masses_inv_sqrt), kpoint=asarray([0., 0., 0.], dtype=hessian.dtype), start_frequency=start_wavenumber, stop_frequency=stop_wavenumber, eigen_range="V")
 
     frequencies, eigenvectors = hessian_object.frequencies_eigenvectors
     frequencies = frequencies * au_bohr_cm_1

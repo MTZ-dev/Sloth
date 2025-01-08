@@ -14,16 +14,16 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from numpy import asarray
+from numpy import asarray, ndarray
 
 from slothpy.core._system import SharedMemoryArrayInfo, _load_shared_memory_arrays
 from slothpy.core._hessian_object import Hessian
 from slothpy._general_utilities._constants import AU_BOHR_CM_1
+from slothpy.core._system import shared_memory_proxy
 
-def _phonon_density_of_states_proxy(sm_arrays_info_list: list[SharedMemoryArrayInfo], args_list, process_index, start: int, end: int):
-    hessian_object = Hessian(sm_arrays_info_list[:2], start_frequency=args_list[0], stop_frequency=args_list[1], eigen_range="V")
-    sm, arrays = _load_shared_memory_arrays(sm_arrays_info_list[2:])
-    kpoints_grid, progress_array = arrays
+@shared_memory_proxy
+def _phonon_density_of_states_proxy(hessian: ndarray, masses_inv_sqrt: ndarray, kpoints_grid: ndarray, start_frequency: float, stop_frequency: float, progress_array: ndarray, process_index: int, start: int, end: int):
+    hessian_object = Hessian(hessian, masses_inv_sqrt, start_frequency=start_frequency, stop_frequency=stop_frequency, eigen_range="V")
     au_bohr_cm_1 = asarray(AU_BOHR_CM_1, dtype=kpoints_grid.dtype)
     
     frequencies_list = []

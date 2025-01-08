@@ -301,16 +301,6 @@ def validate_input(func):
                             raise ValueError("K-point must be an arraylike object of floats.")
                         if value.shape != (3,):
                             raise ValueError("The k-point must have shape (3,).")
-                    case "convolution":
-                        if value not in [None, "lorentzian", "gaussian"]:
-                            raise ValueError("The only valid options for the convolution are 'lorentzian', 'gaussian' or None.")
-                    case "fwhm":
-                        value = settings.float(value)
-                        if value <= 0:
-                            raise ValueError("FWHM must be greater than zero.")
-                    case "resolution":
-                        if (not isinstance(value, (int, int32, int64)) or value <= 0) and value is not None:
-                            raise ValueError("Resolution of the spectra must be set to an integer greater than zero.")
                     case "start_wavenumber":
                         if value is not None:
                             value = settings.float(value)
@@ -325,6 +315,18 @@ def validate_input(func):
                             value = value * value if value >= 0 else -value * value
                             if bound_args.arguments["start_wavenumber"] is not None and value <= bound_args.arguments["start_wavenumber"]:
                                 raise ValueError("The stop_wavenumber must be strictly greater than the start_wavenumber.")
+                    case "convolution":
+                        if value not in [None, "lorentzian", "gaussian"]:
+                            raise ValueError("The only valid options for the convolution are 'lorentzian', 'gaussian' or None.")
+                    case "fwhm":
+                        value = settings.float(value)
+                        if value <= 0:
+                            raise ValueError("FWHM must be greater than zero.")
+                    case "resolution":
+                        if (not isinstance(value, (int, int32, int64)) or value <= 0) and value is not None:
+                            raise ValueError("Resolution of the spectra must be set to an integer greater than zero.")
+                        if value is None and bound_args.arguments["convolution"] is not None:
+                            value = round(10*au_bohr_cm_1*(bound_args.arguments["stop_wavenumber"] - bound_args.arguments["start_wavenumber"]) / bound_args.arguments["fwhm"])        
                     case "kpoints_grid":
                         if isinstance(value, (int, int32, int64)):
                             if value <= 0:
