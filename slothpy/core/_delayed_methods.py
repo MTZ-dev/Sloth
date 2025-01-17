@@ -68,7 +68,7 @@ class SltStatesEnergiesCm1(_SingleProcessed):
         self._data_dict = {"STATES_ENERGIES_CM_1": (self._result,  "States' energies in cm⁻¹.")}
 
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_ENERGIES_CM_1"][:]
+        self._result = self._slt_group["STATES_ENERGIES_CM_1"]
 
     def _plot(self, show=True, **kwargs):
         from slothpy._general_utilities._plot import _plot_energy_levels
@@ -110,7 +110,7 @@ class SltStatesEnergiesAu(_SingleProcessed):
         self._data_dict = {"STATES_ENERGIES_AU": (self._result, "States' energies in cm⁻¹.")}
 
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_ENERGIES_AU"][:]
+        self._result = self._slt_group["STATES_ENERGIES_AU"]
 
     #TODO: plot
     def _plot(self):
@@ -164,7 +164,7 @@ class SltSpinMatrices(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the spin components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["SPIN_MATRICES"][:]
+        self._result = self._slt_group["SPIN_MATRICES"]
 
     #TODO: plot
     def _plot(self):
@@ -204,7 +204,7 @@ class SltStatesSpins(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the spin components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_SPINS"][:]
+        self._result = self._slt_group["STATES_SPINS"]
 
     #TODO: plot
     def _plot(self):
@@ -244,7 +244,7 @@ class SltAngularMomentumMatrices(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the angular momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["ANGULAR_MOMENTUM_MATRICES"][:]
+        self._result = self._slt_group["ANGULAR_MOMENTUM_MATRICES"]
 
     #TODO: plot
     def _plot(self):
@@ -284,7 +284,7 @@ class SltStatesAngularMomenta(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the angular momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_ANGULAR_MOMENTA"][:]
+        self._result = self._slt_group["STATES_ANGULAR_MOMENTA"]
 
     #TODO: plot
     def _plot(self):
@@ -324,7 +324,7 @@ class SltElectricDipoleMomentumMatrices(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the electric dipole momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["ELECTRIC_DIPOLE_MOMENTUM_MATRICES"][:]
+        self._result = self._slt_group["ELECTRIC_DIPOLE_MOMENTUM_MATRICES"]
 
     #TODO: plot
     def _plot(self):
@@ -364,7 +364,7 @@ class SltStatesElectricDipoleMomenta(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the electric dipole momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_ELECTRIC_DIPOLE_MOMENTA"][:]
+        self._result = self._slt_group["STATES_ELECTRIC_DIPOLE_MOMENTA"]
 
     #TODO: plot
     def _plot(self):
@@ -404,7 +404,7 @@ class SltTotalAngularMomentumMatrices(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the total angular momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["TOTAL_ANGULAR_MOMENTUM_MATRICES"][:]
+        self._result = self._slt_group["TOTAL_ANGULAR_MOMENTUM_MATRICES"]
 
     #TODO: plot
     def _plot(self):
@@ -444,7 +444,7 @@ class SltStatesTotalAngularMomenta(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the total angular momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_TOTAL_ANGULAR_MOMENTA"][:]
+        self._result = self._slt_group["STATES_TOTAL_ANGULAR_MOMENTA"]
 
     #TODO: plot
     def _plot(self):
@@ -484,7 +484,7 @@ class SltMagneticDipoleMomentumMatrices(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the magnetic dipole momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["MAGNETIC_DIPOLE_MOMENTUM_MATRICES"][:]
+        self._result = self._slt_group["MAGNETIC_DIPOLE_MOMENTUM_MATRICES"]
 
     #TODO: plot
     def _plot(self):
@@ -524,7 +524,7 @@ class SltStatesMagneticDipoleMomenta(_SingleProcessed):
             self._data_dict["ROTATION"] = (self._rotation, "Rotation used to rotate the magnetic dipole momentum components.")
     
     def _load_from_slt_file(self):
-        self._result = self._slt_group["STATES_MAGNETIC_DIPOLE_MOMENTA"][:]
+        self._result = self._slt_group["STATES_MAGNETIC_DIPOLE_MOMENTA"]
 
     #TODO: plot
     def _plot(self):
@@ -562,7 +562,7 @@ class SltPhononFrequencies(_SingleProcessed):
                            "MODE_NUMBER": (self._result[0], "Dataset containing mode numbers corresponding to the calculated frequencies.")}
 
     def _load_from_slt_file(self):
-        self._result = (self._slt_group["MODE_NUMBER"][:], self._slt_group["FREQUENCIES"][:])
+        self._result = (self._slt_group["MODE_NUMBER"], self._slt_group["FREQUENCIES"])
 
     #TODO: plot
     def _plot(self):
@@ -607,9 +607,9 @@ class SltIrSpectrum(_SingleProcessed):
     
     def _load_from_slt_file(self):
         if self._slt_group.attributes["Kind"] == "INTENSITIES":
-            self._result = (self._slt_group["INTENSITIES"][:])
+            self._result = (self._slt_group["INTENSITIES"])
         else:
-            self._result = (self._slt_group["INTENSITIES"][:], self._slt_group["CONVOLUTION"][:])
+            self._result = (self._slt_group["INTENSITIES"], self._slt_group["CONVOLUTION"])
 
     #TODO: plot
     def _plot(self, *args, **kwargs):
@@ -736,12 +736,12 @@ class SltPropertyUnderMagneticField(_MultiProcessed):
         dims = self._slt_group[self._mode[0]].shape
         self._result = empty((len(self._mode), *dims), dtype=settings.complex if len(dims) == 3 else settings.float, order="C")
         for index, mode in enumerate(self._mode):
-            self._result[index] = self._slt_group[mode_dict[mode]][:]
-        self._magnetic_fields = self._slt_group["MAGNETIC_FIELDS"][:]
-        self._orientations = self._slt_group["ORIENTATIONS"][:]
-        self._direction = self._slt_group["DIRECTION"][:]
+            self._result[index] = self._slt_group[mode_dict[mode]]
+        self._magnetic_fields = self._slt_group["MAGNETIC_FIELDS"]
+        self._orientations = self._slt_group["ORIENTATIONS"]
+        self._direction = self._slt_group["DIRECTION"]
         try:
-            self._energies = self._slt_group["ENERGIES"][:]
+            self._energies = self._slt_group["ENERGIES"]
         except SltFileError:
             self._return_energies = False
     
@@ -826,13 +826,13 @@ class SltZeemanSplitting(_MultiProcessed):
         }
 
     def _load_from_slt_file(self):
-        self._result = self._slt_group["ZEEMAN_SPLITTING"][:]
-        self._magnetic_fields = self._slt_group["MAGNETIC_FIELDS"][:]
-        self._orientations = self._slt_group["ORIENTATIONS"][:]
+        self._result = self._slt_group["ZEEMAN_SPLITTING"]
+        self._magnetic_fields = self._slt_group["MAGNETIC_FIELDS"]
+        self._orientations = self._slt_group["ORIENTATIONS"]
 
     def _plot(self, **kwargs):
         from slothpy._general_utilities._ploting_utilities import _plot_zeeman_splitting
-        _plot_zeeman_splitting(self._, self._result, self._magnetic_fields, **kwargs)
+        _plot_zeeman_splitting(self._, self._result[:], self._magnetic_fields[:], **kwargs)
  
     def _to_data_frame(self):
         pass
@@ -904,9 +904,9 @@ class SltMagnetisation(_MultiProcessed):
         }
 
     def _load_from_slt_file(self):
-        self._result = self._slt_group["MAGNETISATION"][:]
-        self._magnetic_fields = self._slt_group["MAGNETIC_FIELDS"][:]
-        self._orientations = self._slt_group["ORIENTATIONS"][:]
+        self._result = self._slt_group["MAGNETISATION"]
+        self._magnetic_fields = self._slt_group["MAGNETIC_FIELDS"]
+        self._orientations = self._slt_group["ORIENTATIONS"]
 
     def _plot(self):
         pass
@@ -959,16 +959,16 @@ class SltPhononDispersion(_MultiProcessed):
         }
 
     def _load_from_slt_file(self):
-        self._result = self._slt_group[f"{self._method_type}"][:]
-        self._x = self._slt_group["X"][:]
-        self._x_coords = self._slt_group["X_COORDS"][:]
-        self._x_labels = self._slt_group["X_LABELS"][:]
-        self._kpoints = self._slt_group["KPTS_PATH"][:]
+        self._result = self._slt_group[f"{self._method_type}"]
+        self._x = self._slt_group["X"]
+        self._x_coords = self._slt_group["X_COORDS"]
+        self._x_labels = self._slt_group["X_LABELS"]
+        self._kpoints = self._slt_group["KPTS_PATH"]
 
     def _plot(self, **kwargs):
         plt.figure(figsize=(8, 6))
         for mode in range(self._result.shape[1]):
-            plt.plot(self._x, self._result[:, mode], color='b')
+            plt.plot(self._x[:], self._result[:, mode], color='b')
 
         plt.xticks(self._x_coords, self._x_labels)
         plt.xlabel('Wave Vector Fraction along Path')
@@ -1062,18 +1062,18 @@ class SltPhononDensityOfStates(_MultiProcessed):
 
     def _load_from_slt_file(self):
         if self._slt_group.attributes["Kind"] == "HISTOGRAM":
-            self._result = (self._slt_group["BIN_EDGES"][:], self._slt_group["HISTOGRAM"][:])
-            self._kpoints_grid = self._slt_group["KPTS_GRID"][:]
+            self._result = (self._slt_group["BIN_EDGES"], self._slt_group["HISTOGRAM"])
+            self._kpoints_grid = self._slt_group["KPTS_GRID"]
             self._convolution = None
         else:
-            self._result = (self._slt_group["BIN_EDGES"][:], self._slt_group["HISTOGRAM"][:], self._slt_group["FREQUENCIES"][:], self._slt_group["CONVOLUTION"][:])
-            self._kpoints_grid = self._slt_group["KPTS_GRID"][:]
+            self._result = (self._slt_group["BIN_EDGES"], self._slt_group["HISTOGRAM"], self._slt_group["FREQUENCIES"], self._slt_group["CONVOLUTION"])
+            self._kpoints_grid = self._slt_group["KPTS_GRID"]
             self._convolution = True
 
     def _plot(self, **kwargs):
         if self._convolution is None:
             plt.figure(figsize=(8, 6))
-            plt.bar(self._result[0][:-1], self._result[1], width=diff(self._result[0]), edgecolor='black', alpha=0.7)
+            plt.bar(self._result[0][:-1], self._result[1][:], width=diff(self._result[0][:]), edgecolor='black', alpha=0.7)
             plt.xlabel('Frequency (cm$^{-1}$)')
             plt.ylabel('Counts')
             plt.title('Intermediate Histogram of Phonon Frequencies')
@@ -1082,12 +1082,12 @@ class SltPhononDensityOfStates(_MultiProcessed):
         else:
             # You can add info about FWHM which I left in the attributes
             plt.figure(figsize=(8, 6))
-            plt.bar(self._result[0][:-1], self._result[1], width=diff(self._result[0]), edgecolor='black', alpha=0.7)
+            plt.bar(self._result[0][:-1], self._result[1][:], width=diff(self._result[0][:]), edgecolor='black', alpha=0.7)
             plt.xlabel('Frequency (cm$^{-1}$)')
             plt.ylabel('Counts')
             plt.title('Intermediate Histogram of Phonon Frequencies')
             plt.grid(True, linestyle='--', alpha=0.5)
-            plt.plot(self._result[2], self._result[3], color='blue')
+            plt.plot(self._result[2][:], self._result[3][:], color='blue')
             plt.xlabel('Frequency (cm$^{-1}$)')
             plt.ylabel('Density of States (arb. units)')
             plt.title('Phonon Density of States')
